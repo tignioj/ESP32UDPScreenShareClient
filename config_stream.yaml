@@ -5,14 +5,13 @@ streamer:
       params:
         display_idx: 0
         fps: 30
-        region: [0, 0, 1920, 1080]
+        region: [1007, 686, 600, 600]
         use_mss: False
     - type: "screen"
       id: "window_fullscreen"
       params:
         display_idx: 0
         fps: 30
-        full_screen: True
         use_mss: False
     - type: "screen"
       id: "yuanshen"
@@ -42,6 +41,6 @@ streamer:
       params:
         url: "rtsp://192.168.1.100:554/stream"
 
-  active_source: "yuanshen"
+  active_source: "window_region"
   stream_url: "rtmp://server/live/stream"
   bitrate: 2500000
