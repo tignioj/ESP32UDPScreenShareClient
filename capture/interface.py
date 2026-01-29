@@ -12,7 +12,7 @@ class SourceType(Enum):
     VIDEO_FILE = "video_file"
     IMAGE_FILE = "image_file"
     VIRTUAL = "virtual"  # 虚拟源，如测试图、合成图像
-
+    RTSP = "rtsp"  # 新增RTSP类型
 
 class ImageSourceInterface(ABC):
     """图像源接口抽象基类"""
@@ -110,5 +110,5 @@ class ImageSourceInterface(ABC):
         self.release()
 
 
-class ScreenshotError(Exception):
-    pass
+class ScreenshotError(Exception): pass
+class CameraError(Exception): pass

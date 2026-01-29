@@ -3,6 +3,7 @@ from typing import Optional, List, Dict, Any
 import numpy as np
 
 from capture.camera_source import CameraSource
+from capture.rtsp_source import RTSPSource
 from capture.interface import SourceType, ImageSourceInterface
 from capture.screen_capture_source import ScreenCaptureSource
 
@@ -29,6 +30,9 @@ class SourceManager:
         elif source_type == SourceType.CAMERA:
             camera_idx = kwargs.get('camera_idx', 0)
             source = CameraSource(source_id, camera_idx)
+        elif source_type == SourceType.RTSP:
+            rtsp_url = kwargs.get('rtsp_url')
+            source = RTSPSource(rtsp_url=rtsp_url,source_id=source_id)
         else:
             raise ValueError(f"Unsupported source type: {source_type}")
 

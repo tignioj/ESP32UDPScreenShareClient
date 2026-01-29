@@ -36,11 +36,11 @@ streamer:
         resolution: [1280, 720]
         fps: 25
 
-    - type: "camera"
-      id: "ip_camera"
+    - type: "rtsp"
+      id: "my_mobile_phone_rtsp_camera"
       params:
-        url: "rtsp://192.168.1.100:554/stream"
+        rtsp_url: "rtsp://admin:admin@192.168.30.134:8554/live"
 
-  active_source: "window_region"
+  active_source: "my_mobile_phone_rtsp_camera"
   stream_url: "rtmp://server/live/stream"
   bitrate: 2500000
