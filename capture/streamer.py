@@ -23,17 +23,19 @@ class Streamer:
             src_type = SourceType(src_config.get('type', 'screen'))
             src_id = src_config.get('id', '')
 
-            self.source_manager.create_source(
-                source_type=src_type,
-                source_id=src_id,
-                **src_config.get('params', {})
-            )
+            # 只初始化设置为True的源
+            if src_config.get('enable', True):
+                self.source_manager.create_source(
+                    source_type=src_type,
+                    source_id=src_id,
+                    **src_config.get('params', {})
+                )
 
         # 设置活动源
         active_source = self.config.get('active_source')
         if active_source:
             switch_ok = self.source_manager.switch_source(active_source)
-            if not switch_ok: raise Exception(f'配置源不存在，请检查配置文件的active_source: {active_source}')
+            if not switch_ok: raise Exception(f'配置源不存在或者初始化失败，请检查配置文件{active_source}')
 
         self._initialized = True
         return True

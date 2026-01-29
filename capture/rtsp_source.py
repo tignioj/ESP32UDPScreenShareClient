@@ -1,3 +1,5 @@
+import queue
+import threading
 from abc import ABC, abstractmethod
 from typing import Optional, Tuple, List, Dict, Any
 from enum import Enum
@@ -50,6 +52,63 @@ class RTSPSource(ImageSourceInterface):
         self.reconnect_count = 0
         self._info_cache = {}
 
+
+    @staticmethod
+    def _read_rtsp_with_timeout(rtsp_url, timeout=10):
+        """
+        带超时的RTSP连接
+        Args:
+            rtsp_url: RTSP地址
+            timeout: 超时时间（秒）
+        Returns:
+            VideoCapture对象或None
+        """
+        result_queue = queue.Queue()
+        stop_event = threading.Event()
+
+        def worker():
+            try:
+                cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
+
+                # 设置缓冲区大小，减少延迟
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+                # 尝试读取一帧
+                for _ in range(10):  # 尝试10次
+                    if stop_event.is_set():
+                        cap.release()
+                        return
+
+                    ret, frame = cap.read()
+                    if ret:
+                        result_queue.put(cap)
+                        return
+                    time.sleep(0.1)
+
+                # 如果一直读取不到帧
+                cap.release()
+                result_queue.put(None)
+
+            except Exception as e:
+                result_queue.put(None)
+
+        # 启动工作线程
+        worker_thread = threading.Thread(target=worker)
+        worker_thread.daemon = True
+        worker_thread.start()
+
+        # 等待结果或超时
+        try:
+            result = result_queue.get(timeout=timeout)
+            return result
+        except queue.Empty:
+            # 超时，通知工作线程停止
+            stop_event.set()
+            print(f"连接RTSP超时（{timeout}秒）")
+            return None
+        finally:
+            # 等待线程结束（最多1秒）
+            worker_thread.join(timeout=1)
     def initialize(self, **kwargs) -> bool:
         """
         初始化RTSP连接
@@ -82,8 +141,7 @@ class RTSPSource(ImageSourceInterface):
                 rtsp_url = self.rtsp_url
 
             logger.info(f"尝试连接RTSP流: {rtsp_url}")
-            self.cap = cv2.VideoCapture(rtsp_url)
-
+            self.cap = RTSPSource._read_rtsp_with_timeout(rtsp_url, timeout=self.config['timeout'])
             # 设置额外属性
             for prop, value in cap_props.items():
                 self.cap.set(prop, value)
