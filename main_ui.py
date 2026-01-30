@@ -14,11 +14,8 @@ try:
     import cv2
     import numpy as np
     import socket
-    from capture.streamer import Streamer
-    with open('config_stream.yaml', encoding="utf-8",mode='r') as f:
-        config = yaml.safe_load(f)
-    # 创建推流器
-    streamer = Streamer(config.get('streamer', {}))
+    from  capture.config import get_streamer
+    streamer = get_streamer()
 
     # 初始化
     if not streamer.initialize():
