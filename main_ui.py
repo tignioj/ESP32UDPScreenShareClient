@@ -18,7 +18,7 @@ try:
     streamer = get_streamer()
 
     # 初始化
-    if not streamer.initialize():
+    if streamer is None:
         print("Failed to initialize streamer")
     UDP_MODULES_AVAILABLE = True
 except ImportError as e:
@@ -30,7 +30,7 @@ except ImportError as e:
 class YAMLConfigEditor:
     def __init__(self, root):
         self.root = root
-        self.root.title("YAML 配置文件编辑器")
+        self.root.title("YAML 配置文件编辑器V0.0.2")
         self.root.geometry("700x650")  # 稍微增加高度以容纳更多预设
 
         # UDP推流相关
@@ -74,20 +74,24 @@ class YAMLConfigEditor:
             "预设4: 中清低彩": {
                 'resolution': 180,  # ESP32UDPHeader.RES_180 = 1
                 'color_mode': 1,  # ESP32UDPHeader.COLOR_RGB332 = 1
-                'lines_per_packet': 8,
-                'udp_interval': 0.001
+                # 'lines_per_packet': 8,
+                # 'udp_interval': 0.001
+                'lines_per_packet': 6,
+                'udp_interval': 0.00075
             },
             "预设5: 低清高彩": {
                 'resolution': 120,  # ESP32UDPHeader.RES_120 = 2
                 'color_mode': 0,  # ESP32UDPHeader.COLOR_RGB565 = 0
-                'lines_per_packet': 6,
-                'udp_interval': 0.000945
+                # 'lines_per_packet': 6,
+                # 'udp_interval': 0.000945
+                'lines_per_packet': 4,
+                'udp_interval': 0.00075
             },
             "预设6: 低清低彩": {  # 新增预设6
                 'resolution': 120,  # ESP32UDPHeader.RES_120 = 2
                 'color_mode': 1,  # ESP32UDPHeader.COLOR_RGB332 = 1
-                'lines_per_packet': 6,
-                'udp_interval': 0.000945
+                'lines_per_packet': 4,
+                'udp_interval': 0.00075
             }
         }
 

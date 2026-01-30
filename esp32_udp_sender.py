@@ -24,16 +24,19 @@ config1 = {'resolution': ESP32UDPHeader.RES_240, 'color_mode': ESP32UDPHeader.CO
 config2 = {'resolution': ESP32UDPHeader.RES_240, 'color_mode': ESP32UDPHeader.COLOR_RGB332, 'lines_per_packet': 6,'udp_interval': 0.0005}
 # 中清高彩
 config3 = {'resolution': ESP32UDPHeader.RES_180, 'color_mode': ESP32UDPHeader.COLOR_RGB565, 'lines_per_packet': 4,'udp_interval': 0.0005}
-# config4 = {'resolution': ESP32UDPHeader.RES_180, 'color_mode': ESP32UDPHeader.COLOR_RGB332, 'lines_per_packet': 4,'udp_interval': 0.0005}
+
 # 中清低彩
-config4 = {'resolution': ESP32UDPHeader.RES_180, 'color_mode': ESP32UDPHeader.COLOR_RGB332, 'lines_per_packet': 8,'udp_interval': 0.001}
+# config4 = {'resolution': ESP32UDPHeader.RES_180, 'color_mode': ESP32UDPHeader.COLOR_RGB332, 'lines_per_packet': 4,'udp_interval': 0.0005}
+# config4 = {'resolution': ESP32UDPHeader.RES_180, 'color_mode': ESP32UDPHeader.COLOR_RGB332, 'lines_per_packet': 8,'udp_interval': 0.001}
+config4 = {'resolution': ESP32UDPHeader.RES_180, 'color_mode': ESP32UDPHeader.COLOR_RGB332, 'lines_per_packet': 6,'udp_interval': 0.00075}
 # 低请高彩
-config5 = {'resolution': ESP32UDPHeader.RES_120, 'color_mode': ESP32UDPHeader.COLOR_RGB565, 'lines_per_packet': 6,'udp_interval': 0.000945}
-
+# config5 = {'resolution': ESP32UDPHeader.RES_120, 'color_mode': ESP32UDPHeader.COLOR_RGB565, 'lines_per_packet': 6,'udp_interval': 0.000945}
+config5 = {'resolution': ESP32UDPHeader.RES_120, 'color_mode': ESP32UDPHeader.COLOR_RGB565, 'lines_per_packet': 4,'udp_interval': 0.00075}
 # 低请低彩
-config6 = {'resolution': ESP32UDPHeader.RES_120, 'color_mode': ESP32UDPHeader.COLOR_RGB332, 'lines_per_packet': 6,'udp_interval': 0.000945}
+# config6 = {'resolution': ESP32UDPHeader.RES_120, 'color_mode': ESP32UDPHeader.COLOR_RGB332, 'lines_per_packet': 6,'udp_interval': 0.000945}
+config6 = {'resolution': ESP32UDPHeader.RES_120, 'color_mode': ESP32UDPHeader.COLOR_RGB332, 'lines_per_packet': 4,'udp_interval': 0.00075}
 
-option = config6
+option = config1
 
 LINES_PER_PACKET = option['lines_per_packet']  # 每个 UDP 包发多少行
 if option['resolution'] == ESP32UDPHeader.RES_240: WIDTH = 240

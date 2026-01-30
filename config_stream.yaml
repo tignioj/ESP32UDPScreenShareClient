@@ -5,7 +5,7 @@ streamer:
       params:
         display_idx: 0
         fps: 30
-        region: [1007, 686, 600, 600]
+        region: [100, 100, 600, 600]
         use_mss: False
     - type: "screen"
       id: "window_fullscreen"
@@ -31,6 +31,7 @@ streamer:
 
     - type: "camera"
       id: "webcam"
+      enable: false
       params:
         camera_idx: 0
         resolution: [1280, 720]
@@ -44,6 +45,6 @@ streamer:
         buffer_size: 5000
         timeout: 3
 
-  active_source: "webcam"
+  active_source: "yuanshen"
   stream_url: "rtmp://server/live/stream"
   bitrate: 2500000
