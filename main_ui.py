@@ -29,8 +29,12 @@ except ImportError as e:
 
 class YAMLConfigEditor:
     def __init__(self, root):
+        print("==================================================================================================================")
+        print("欢迎使用ESP32Holocubic ScreenShareUDP推流工具，本项目开源免费，地址是:https://github.com/tignioj/ESP32UDPScreenShareClient")
+        print("配置文件路径在_internal/config_stream.yaml, 首次使用请查看README.md")
+        print("==================================================================================================================")
         self.root = root
-        self.root.title("YAML 配置文件编辑器V0.0.2")
+        self.root.title("YAML 配置文件编辑器V0.0.3")
         self.root.geometry("700x650")  # 稍微增加高度以容纳更多预设
 
         # UDP推流相关
@@ -620,7 +624,7 @@ class YAMLConfigEditor:
                     if sc is None:
                         sc = last_frame
                         if sc is None:
-                            time.sleep(0.001)
+                            # time.sleep(0.001)
                             continue
                     else:
                         last_frame = sc

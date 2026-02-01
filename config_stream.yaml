@@ -2,8 +2,8 @@ streamer:
   sources:
     - type: "video_file" # 视频
       id: "video_player"
+      enable: False
       params:
-#        video_path: 'C:\Users\Administrator\Desktop\obsrecord'
         video_path: 'I:\genshin_video\character_show'
         auto_play_next: True  # 是否自动循环播放全部视频
         random_play: True # 是否开启乱序循环播放
@@ -54,6 +54,6 @@ streamer:
         buffer_size: 5000
         timeout: 3
 
-  active_source: "video_player"
+  active_source: "window_fullscreen"
   stream_url: "rtmp://server/live/stream"
   bitrate: 2500000

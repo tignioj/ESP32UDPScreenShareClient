@@ -30,12 +30,17 @@ class Streamer:
                     source_id=src_id,
                     **src_config.get('params', {})
                 )
+                print(f"成功加载配置源{src_id}")
+            else:
+                print(f"没有开启的的配置源:{src_id}")
 
         # 设置活动源
         active_source = self.config.get('active_source')
         if active_source:
+            print(f"正在尝试切换到指定源:{active_source}")
             switch_ok = self.source_manager.switch_source(active_source)
             if not switch_ok: raise Exception(f'配置源不存在或者初始化失败，请检查配置文件{active_source}')
+            print(f"成功切换到指定源:{active_source}")
 
         self._initialized = True
         return True

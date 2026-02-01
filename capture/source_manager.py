@@ -43,7 +43,7 @@ class SourceManager:
 
         # 初始化
         if not source.initialize(**kwargs):
-            print(f"Failed to initialize source {source_id}")
+            print(f"警告：配置源初始化失败：{source_id}")
             return None
 
         # 生成ID（如果未提供）
