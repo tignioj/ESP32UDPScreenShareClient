@@ -1,39 +1,154 @@
-from typing import Optional, List, Dict, Any
-
-import numpy
+import cv2
+import os
+import random
+import time
 import numpy as np
-
-from capture.interface import ImageSourceInterface, SourceType
+from typing import Optional, List, Dict, Any
+from capture.interface import SourceType, ImageSourceInterface
 
 
 class VideoFileSource(ImageSourceInterface):
+    """视频文件播放源"""
+
     def __init__(self, source_type: SourceType, source_id: str = ""):
         super().__init__(source_type, source_id)
-        pass
+        self.video_path: str = ""
+        self.auto_play_next: bool = True
+        self.random_play: bool = False
+        self.first_play_video: Optional[str] = None
+
+        self._video_files: List[str] = []
+        self._current_idx: int = 0
+        self._cap: Optional[cv2.VideoCapture] = None
+        self._last_frame_time: float = 0.0
+        self._frame_interval: float = 1.0 / self._fps
+
+    def initialize(self, **kwargs) -> bool:
+        self.video_path = kwargs.get('video_path', '')
+        self.auto_play_next = kwargs.get('auto_play_next', True)
+        self.random_play = kwargs.get('random_play', False)
+        self.first_play_video = kwargs.get('first_play_video', None)
+        self.fps = kwargs.get('fps', 30)
+
+        if not os.path.isdir(self.video_path):
+            print(f"[VideoFileSource] video_path 不存在: {self.video_path}")
+            return False
+
+        # 获取所有 mp4 文件
+        self._video_files = [f for f in os.listdir(self.video_path)
+                             if f.lower().endswith('.mp4')]
+        if not self._video_files:
+            print(f"[VideoFileSource] 未找到 mp4 视频: {self.video_path}")
+            return False
+
+        # 如果指定第一个播放的视频
+        if self.first_play_video and self.first_play_video in self._video_files:
+            self._video_files.remove(self.first_play_video)
+            self._video_files.insert(0, self.first_play_video)
+
+        self._current_idx = 0
+        return self._open_current_video()
+
+    def _open_current_video(self) -> bool:
+        """打开当前视频"""
+        if self._cap:
+            self._cap.release()
+            self._cap = None
+
+        if not self._video_files:
+            return False
+
+        video_file = os.path.join(self.video_path, self._video_files[self._current_idx])
+        self._cap = cv2.VideoCapture(video_file)
+        if not self._cap.isOpened():
+            print(f"[VideoFileSource] 打开视频失败: {video_file}")
+            return False
+
+        # 获取视频帧率，方便同步播放
+        video_fps = self._cap.get(cv2.CAP_PROP_FPS)
+        self._frame_interval = 1.0 / (self._fps or video_fps or 30)
+        self._last_frame_time = time.time()
+        return True
+
+    def _next_video_index(self) -> int:
+        """计算下一个视频索引"""
+        if not self.auto_play_next:
+            return 0  # 不自动切换，永远播放第一个视频
+
+        if self.random_play:
+            return random.randint(0, len(self._video_files) - 1)
+        else:
+            return (self._current_idx + 1) % len(self._video_files)
 
     def capture(self) -> Optional[np.ndarray]:
-        height, width = 240, 240
-        image = np.zeros((height, width, 3), dtype=np.uint8)
-        # 将宽度分为7段，创建彩虹色
-        segment_width = width // 7
-        colors = [
-            [255, 0, 0],  # 红色
-            [255, 165, 0],  # 橙色
-            [255, 255, 0],  # 黄色
-            [0, 255, 0],  # 绿色
-            [0, 255, 255],  # 青色
-            [0, 0, 255],  # 蓝色
-            [128, 0, 128]  # 紫色
-        ]
-        for i in range(7):
-            start_x = i * segment_width
-            end_x = (i + 1) * segment_width if i < 6 else width
-            image[:, start_x:end_x] = colors[i]
-        return image
+        if not self._cap or not self._is_running:
+            return None
 
-    def initialize(self, **kwargs) -> bool: return True
-    def get_image(self) -> np.ndarray: pass
-    def get_info(self) -> dict: pass
-    def release(self, **kwargs) -> bool: pass
-    def set_config(self, **kwargs) -> bool: pass
-    def get_available_configs(self) -> List[Dict[str, Any]]:pass
+        now = time.time()
+        if now - self._last_frame_time < self._frame_interval:
+            return None  # 控制帧率
+
+        ret, frame = self._cap.read()
+        if not ret:
+            # 当前视频播放完毕，切换下一个
+            self._current_idx = self._next_video_index()
+            if not self._open_current_video():
+                return None
+            ret, frame = self._cap.read()
+            if not ret:
+                return None
+
+        self._last_frame_time = now
+        # 转为 RGB
+        # frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        return frame
+
+    def get_info(self) -> Dict[str, Any]:
+        info = {
+            'video_path': self.video_path,
+            'current_video': self._video_files[self._current_idx] if self._video_files else None,
+            'fps': self.fps,
+            'auto_play_next': self.auto_play_next,
+            'random_play': self.random_play
+        }
+        if self._cap:
+            info['width'] = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            info['height'] = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        return info
+
+    def get_available_configs(self) -> List[Dict[str, Any]]:
+        return [
+            {'param': 'video_path', 'type': 'str'},
+            {'param': 'fps', 'type': 'float', 'range': [1, 120]},
+            {'param': 'auto_play_next', 'type': 'bool'},
+            {'param': 'random_play', 'type': 'bool'},
+            {'param': 'first_play_video', 'type': 'str'}
+        ]
+
+    def set_config(self, config: Dict[str, Any]) -> bool:
+        for key, value in config.items():
+            if key == 'video_path':
+                self.video_path = value
+            elif key == 'fps':
+                self.fps = value
+            elif key == 'auto_play_next':
+                self.auto_play_next = bool(value)
+            elif key == 'random_play':
+                self.random_play = bool(value)
+            elif key == 'first_play_video':
+                self.first_play_video = value
+        # 如果路径变化，需要重新扫描
+        if 'video_path' in config or 'first_play_video' in config:
+            return self.initialize(
+                video_path=self.video_path,
+                auto_play_next=self.auto_play_next,
+                random_play=self.random_play,
+                first_play_video=self.first_play_video,
+                fps=self.fps
+            )
+        return True
+
+    def release(self):
+        if self._cap:
+            self._cap.release()
+            self._cap = None

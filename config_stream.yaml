@@ -3,10 +3,12 @@ streamer:
     - type: "video_file" # 视频
       id: "video_player"
       params:
-        display_idx: 0
+#        video_path: 'C:\Users\Administrator\Desktop\obsrecord'
+        video_path: 'I:\genshin_video\character_show'
+        auto_play_next: True  # 是否自动循环播放全部视频
+        random_play: True # 是否开启乱序循环播放
+#        first_play_video: 'xinhai.mp4'  # 指定第一个播放的视频
         fps: 30
-        region: [684, 330, 300, 300]
-        use_mss: False
     - type: "screen" # 区域截图
       id: "window_region"
       params:

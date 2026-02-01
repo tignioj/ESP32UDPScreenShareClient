@@ -609,7 +609,7 @@ class YAMLConfigEditor:
                 f"Header参数: 分辨率代码={resolution_code}, 颜色代码={color_mode_code}, 每包行数={lines_per_packet}")
 
             frame_id = 0
-
+            last_frame = None
             while self.streaming:
                 frame_id = (frame_id + 1) & 0xFFFF
 
@@ -617,6 +617,13 @@ class YAMLConfigEditor:
                     # 捕获屏幕
                     # sc = cap.capture_window_by_title("原神", mss_mode=False)
                     sc = streamer.get_frame()  # 调用这个接口,不关心流来自于哪里，只需要返回一张任意大小的图片
+                    if sc is None:
+                        sc = last_frame
+                        if sc is None:
+                            time.sleep(0.001)
+                            continue
+                    else:
+                        last_frame = sc
                     # 可以取消下面这行的注释来捕获特定区域
                     # sc = cap.capture_region(641, 377, 600, 600)
 
