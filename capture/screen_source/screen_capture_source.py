@@ -21,13 +21,13 @@ class ScreenCaptureSource(ImageSourceInterface):
 
         # 根据平台选择实现
         if system == "Windows":
-            from .screenshot_win import WindowsScreenCapture
+            from capture.screen_source.screenshot_win import WindowsScreenCapture
             self._impl = WindowsScreenCapture(self.display_idx)
         elif system == "Darwin":
-            from .screenshot_mac import MacScreenCapture
+            from capture.screen_source.screenshot_mac import MacScreenCapture
             self._impl = MacScreenCapture(self.display_idx)
         elif system == "Linux":
-            from .screenshot_linux import LinuxScreenCapture
+            from capture.screen_source.screenshot_linux import LinuxScreenCapture
             self._impl = LinuxScreenCapture(self.display_idx)
         else:
             raise RuntimeError(f"Unsupported platform: {system}")

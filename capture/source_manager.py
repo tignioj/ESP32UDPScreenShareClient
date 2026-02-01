@@ -2,10 +2,11 @@ from typing import Optional, List, Dict, Any
 
 import numpy as np
 
-from capture.camera_source import CameraSource
-from capture.rtsp_source import RTSPSource
+from capture.camera_source.camera_source import CameraSource
+from capture.rtsp_source.rtsp_source import RTSPSource
 from capture.interface import SourceType, ImageSourceInterface
-from capture.screen_capture_source import ScreenCaptureSource
+from capture.screen_source.screen_capture_source import ScreenCaptureSource
+from capture.video_source.video_source import VideoFileSource
 
 
 class SourceManager:
@@ -33,6 +34,10 @@ class SourceManager:
         elif source_type == SourceType.RTSP:
             rtsp_url = kwargs.get('rtsp_url')
             source = RTSPSource(rtsp_url=rtsp_url,source_id=source_id)
+        elif source_type == SourceType.VIDEO_FILE:
+            video_path = kwargs.get('video_path')
+            source = VideoFileSource(source_type=source_type,source_id=source_id)
+
         else:
             raise ValueError(f"Unsupported source type: {source_type}")
 

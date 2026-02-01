@@ -1,19 +1,26 @@
 streamer:
   sources:
-    - type: "screen"
+    - type: "video_file" # 视频
+      id: "video_player"
+      params:
+        display_idx: 0
+        fps: 30
+        region: [684, 330, 300, 300]
+        use_mss: False
+    - type: "screen" # 区域截图
       id: "window_region"
       params:
         display_idx: 0
         fps: 30
-        region: [100, 100, 600, 600]
+        region: [684, 330, 300, 300]
         use_mss: False
-    - type: "screen"
+    - type: "screen"  # 全屏截图
       id: "window_fullscreen"
       params:
         display_idx: 0
         fps: 30
         use_mss: False
-    - type: "screen"
+    - type: "screen"  # 按窗口截图
       id: "yuanshen"
       params:
         window_title: '原神'
@@ -21,7 +28,7 @@ streamer:
         fps: 30
         use_mss: False
         remove_title_bar: True
-    - type: "screen"
+    - type: "screen"  # 按窗口截图（use_mss=True兼容模式)
       id: "zzz"
       params:
         window_title: '绝区零'
@@ -29,7 +36,7 @@ streamer:
         fps: 30
         use_mss: True
 
-    - type: "camera"
+    - type: "camera" # 相机
       id: "webcam"
       enable: false
       params:
@@ -37,7 +44,7 @@ streamer:
         resolution: [1280, 720]
         fps: 25
 
-    - type: "rtsp"
+    - type: "rtsp" #rtsp
       id: "my_mobile_phone_rtsp_camera"
       enable: false
       params:
@@ -45,6 +52,6 @@ streamer:
         buffer_size: 5000
         timeout: 3
 
-  active_source: "yuanshen"
+  active_source: "video_player"
   stream_url: "rtmp://server/live/stream"
   bitrate: 2500000
