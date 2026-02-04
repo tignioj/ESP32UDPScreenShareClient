@@ -34,7 +34,7 @@ class YAMLConfigEditor:
         print("配置文件路径在_internal/config_stream.yaml, 首次使用请查看README.md")
         print("==================================================================================================================")
         self.root = root
-        self.root.title("YAML 配置文件编辑器V0.0.3")
+        self.root.title("YAML 配置文件编辑器V0.0.4")
         self.root.geometry("700x650")  # 稍微增加高度以容纳更多预设
 
         # UDP推流相关

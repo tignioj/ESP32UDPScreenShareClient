@@ -4,8 +4,9 @@ streamer:
       id: "video_player"
       enable: True
       params:
-        video_path: 'I:\genshin_video\character_show'
-        auto_play_next: True  # 是否自动循环播放全部视频
+#        video_path: 'I:\genshin_video\character_show'
+        video_path: 'sample_video'
+        auto_play_next: True # 是否自动循环播放全部视频
         auto_crop_center: True # 是否自动裁边居中
         random_play: True # 是否开启乱序循环播放
 #        first_play_video: 'xinhai.mp4'  # 指定第一个播放的视频

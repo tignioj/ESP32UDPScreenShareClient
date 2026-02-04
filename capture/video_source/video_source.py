@@ -31,10 +31,15 @@ class VideoFileSource(ImageSourceInterface):
         self.first_play_video = kwargs.get('first_play_video', None)
         self.fps = kwargs.get('fps', 30)
         self.auto_crop_center = kwargs.get('auto_crop_center', False)
-
         if not os.path.isdir(self.video_path):
             print(f"[VideoFileSource] video_path 不存在: {self.video_path}")
-            return False
+            from capture.config import application_path
+            sample_video_path = os.path.join(application_path, 'sample_video')
+            print(f"[VideoFileSource] 尝试加载内置视频: {sample_video_path}")
+            if not os.path.isdir(sample_video_path):
+                print(f"[VideoFileSource] 内置视频也不存在，初始化失败: {application_path}")
+                return False
+            self.video_path = sample_video_path
 
         # 获取所有 mp4 文件
         self._video_files = [f for f in os.listdir(self.video_path)
