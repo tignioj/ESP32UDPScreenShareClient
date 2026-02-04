@@ -13,8 +13,9 @@ if __name__ == "__main__":
         video_path=r"I:\genshin_video\character_show",
         auto_play_next=True,
         random_play=True,
-        first_play_video="xinhai.mp4",
-        fps=30
+        auto_crop_center=True,
+        # first_play_video="naxida.mp4",
+        fps=25
     )
 
     video_source.start()
@@ -25,8 +26,8 @@ if __name__ == "__main__":
             if frame is not None:
                 # 显示视频帧
                 cv2.imshow("Video Playback", frame)
-            else:
-                print('Empty Frame!')
+            # else:
+            #     print('Empty Frame!')
 
             # 按 q 退出
             if cv2.waitKey(1) & 0xFF == ord('q'):

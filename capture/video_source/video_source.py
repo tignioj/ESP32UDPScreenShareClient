@@ -16,6 +16,7 @@ class VideoFileSource(ImageSourceInterface):
         self.auto_play_next: bool = True
         self.random_play: bool = False
         self.first_play_video: Optional[str] = None
+        self.auto_crop_center: bool = False  # 视频裁边居中
 
         self._video_files: List[str] = []
         self._current_idx: int = 0
@@ -29,6 +30,7 @@ class VideoFileSource(ImageSourceInterface):
         self.random_play = kwargs.get('random_play', False)
         self.first_play_video = kwargs.get('first_play_video', None)
         self.fps = kwargs.get('fps', 30)
+        self.auto_crop_center = kwargs.get('auto_crop_center', False)
 
         if not os.path.isdir(self.video_path):
             print(f"[VideoFileSource] video_path 不存在: {self.video_path}")
@@ -80,6 +82,25 @@ class VideoFileSource(ImageSourceInterface):
         else:
             return (self._current_idx + 1) % len(self._video_files)
 
+    def resize_crop_square(self, img, target_size=240):
+        h, w = img.shape[:2]
+
+        if w > h:
+            # 裁左右
+            crop = h
+            x0 = (w - crop) // 2
+            img = img[:, x0:x0 + crop]
+        elif h > w:
+            # 裁上下
+            crop = w
+            y0 = (h - crop) // 2
+            img = img[y0:y0 + crop, :]
+        # w == h 不需要裁
+
+        # 等比例 resize
+        img = cv2.resize(img, (target_size, target_size),
+                         interpolation=cv2.INTER_AREA)
+        return img
     def capture(self) -> Optional[np.ndarray]:
         if not self._cap or not self._is_running:
             return None
@@ -101,6 +122,8 @@ class VideoFileSource(ImageSourceInterface):
         self._last_frame_time = now
         # 转为 RGB
         # frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        if self.auto_crop_center:
+            frame = self.resize_crop_square(frame, 240)
         return frame
 
     def get_info(self) -> Dict[str, Any]:
@@ -109,7 +132,8 @@ class VideoFileSource(ImageSourceInterface):
             'current_video': self._video_files[self._current_idx] if self._video_files else None,
             'fps': self.fps,
             'auto_play_next': self.auto_play_next,
-            'random_play': self.random_play
+            'random_play': self.random_play,
+            'auto_crop_center': self.auto_crop_center
         }
         if self._cap:
             info['width'] = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -122,7 +146,8 @@ class VideoFileSource(ImageSourceInterface):
             {'param': 'fps', 'type': 'float', 'range': [1, 120]},
             {'param': 'auto_play_next', 'type': 'bool'},
             {'param': 'random_play', 'type': 'bool'},
-            {'param': 'first_play_video', 'type': 'str'}
+            {'param': 'first_play_video', 'type': 'str'},
+            {'param': 'auto_crop_center', 'type': 'bool'}
         ]
 
     def set_config(self, config: Dict[str, Any]) -> bool:
@@ -135,8 +160,8 @@ class VideoFileSource(ImageSourceInterface):
                 self.auto_play_next = bool(value)
             elif key == 'random_play':
                 self.random_play = bool(value)
-            elif key == 'first_play_video':
-                self.first_play_video = value
+            elif key == 'first_play_video': self.first_play_video = value
+            elif key == 'auto_crop_center': self.auto_crop_center = value
         # 如果路径变化，需要重新扫描
         if 'video_path' in config or 'first_play_video' in config:
             return self.initialize(
@@ -144,7 +169,8 @@ class VideoFileSource(ImageSourceInterface):
                 auto_play_next=self.auto_play_next,
                 random_play=self.random_play,
                 first_play_video=self.first_play_video,
-                fps=self.fps
+                fps=self.fps,
+                auto_crop_center=self.auto_crop_center
             )
         return True
 

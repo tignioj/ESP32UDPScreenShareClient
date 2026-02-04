@@ -2,10 +2,11 @@ streamer:
   sources:
     - type: "video_file" # 视频
       id: "video_player"
-      enable: False
+      enable: True
       params:
         video_path: 'I:\genshin_video\character_show'
         auto_play_next: True  # 是否自动循环播放全部视频
+        auto_crop_center: True # 是否自动裁边居中
         random_play: True # 是否开启乱序循环播放
 #        first_play_video: 'xinhai.mp4'  # 指定第一个播放的视频
         fps: 30
@@ -54,6 +55,6 @@ streamer:
         buffer_size: 5000
         timeout: 3
 
-  active_source: "window_fullscreen"
+  active_source: "video_player"
   stream_url: "rtmp://server/live/stream"
   bitrate: 2500000
