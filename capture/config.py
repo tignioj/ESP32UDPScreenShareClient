@@ -30,17 +30,17 @@ import cv2
 from capture.streamer import Streamer
 import yaml
 import sys,os
-# application_path = '.'
-# if getattr(sys, 'frozen', False):
-#     application_path = os.path.dirname(sys.executable)
-#     application_path = os.path.join(application_path, '_internal')
-# elif __file__:
-#     application_path = os.path.dirname(os.path.dirname(__file__))
-#
-def resource_path(rel_path):
-    if getattr(sys, 'frozen', False):
-        return os.path.join(sys._MEIPASS, rel_path)
-    return os.path.abspath(rel_path)
+application_path = '.'
+if getattr(sys, 'frozen', False):
+    application_path = os.path.dirname(sys.executable)
+    application_path = os.path.join(application_path, '_internal')
+elif __file__:
+    application_path = os.path.dirname(os.path.dirname(__file__))
+
+# def resource_path(rel_path):
+#     if getattr(sys, 'frozen', False):
+#         return os.path.join(sys._MEIPASS, rel_path)
+#     return os.path.abspath(rel_path)
 
 # cfg = resource_path("config.yaml")
 
@@ -50,7 +50,7 @@ def get_streamer() -> Streamer:
     global  __streamer
     # 加载配置
     if __streamer is None:
-        with open(resource_path('config_stream.yaml'), encoding="utf-8",mode='r') as f:
+        with open(os.path.join(application_path,'config_stream.yaml'), encoding="utf-8",mode='r') as f:
             config = yaml.safe_load(f)
         # 创建推流器
         __streamer = Streamer(config.get('streamer', {}))
