@@ -4,9 +4,12 @@ import time
 import math
 import numpy as np
 from typing import Optional, Tuple, List, Dict, Any
-import win32gui
-import win32ui
-import win32con
+try:
+    import win32gui
+    import win32ui
+    import win32con
+except ImportError:
+    print("No module named 'win32gui'")
 import ctypes
 from ctypes import windll
 

@@ -2,7 +2,7 @@
 from capture.interface import ImageSourceInterface
 
 
-class LinuxScreenshot(ImageSourceInterface):
+class LinuxScreenCapture(ImageSourceInterface):
     def capture(self, region=None):
         # 使用X11或Wayland实现
         pass
