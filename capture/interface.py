@@ -7,12 +7,14 @@ import time
 
 class SourceType(Enum):
     """图像源类型"""
+    DEMO = "demo"  # 样本
     SCREEN = "screen"
     CAMERA = "camera"
     VIDEO_FILE = "video_file"
     IMAGE_FILE = "image_file"
     VIRTUAL = "virtual"  # 虚拟源，如测试图、合成图像
     RTSP = "rtsp"  # 新增RTSP类型
+    AUDIO_VISUALIZATION = "audio_visualization"  # 音频可视化
 
 class ImageSourceInterface(ABC):
     """图像源接口抽象基类"""

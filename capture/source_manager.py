@@ -8,6 +8,7 @@ from capture.rtsp_source.rtsp_source import RTSPSource
 from capture.interface import SourceType, ImageSourceInterface
 from capture.screen_source.screen_capture_source import ScreenCaptureSource
 from capture.video_source.video_source import VideoFileSource
+from capture.audio_visualization_source.audio_visualization_source import AudioVisualizationSource
 
 
 class SourceManager:
@@ -39,6 +40,8 @@ class SourceManager:
             source = RTSPSource(rtsp_url=rtsp_url,source_id=source_id)
         elif source_type == SourceType.VIDEO_FILE:
             source = VideoFileSource(source_type=source_type,source_id=source_id)
+        elif source_type == SourceType.AUDIO_VISUALIZATION:
+            source = AudioVisualizationSource(source_type=source_type, source_id=source_id)
 
         else:
             raise ValueError(f"Unsupported source type: {source_type}")

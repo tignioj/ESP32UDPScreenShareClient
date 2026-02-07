@@ -3,6 +3,8 @@ streamer:
     - type: "demo" # 基础示例
       id: 'demo1'
 
+    - type: "audio_visualization"
+      id: 'audio_visual1'
 
 
     - type: "video_file" # 本地视频文件
@@ -61,6 +63,8 @@ streamer:
         buffer_size: 5000
         timeout: 3
 
-  active_source: "video_player"
+#  active_source: "yuanshen"
+  active_source: "audio_visual1"
+#  active_source: "window_region"
   stream_url: "rtmp://server/live/stream"
   bitrate: 2500000
