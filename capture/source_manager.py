@@ -2,6 +2,7 @@ from typing import Optional, List, Dict, Any
 
 import numpy as np
 
+from capture.demo_source.demo_source import DemoSource
 from capture.camera_source.camera_source import CameraSource
 from capture.rtsp_source.rtsp_source import RTSPSource
 from capture.interface import SourceType, ImageSourceInterface
@@ -25,7 +26,9 @@ class SourceManager:
             return None
 
         # 根据类型创建对应的源
-        if source_type == SourceType.SCREEN:
+        if source_type == SourceType.DEMO:
+            source = DemoSource(source_type,source_id)
+        elif source_type == SourceType.SCREEN:
             display_idx = kwargs.get('display_idx', 0)
             source = ScreenCaptureSource(source_id, display_idx)
         elif source_type == SourceType.CAMERA:
@@ -35,7 +38,6 @@ class SourceManager:
             rtsp_url = kwargs.get('rtsp_url')
             source = RTSPSource(rtsp_url=rtsp_url,source_id=source_id)
         elif source_type == SourceType.VIDEO_FILE:
-            video_path = kwargs.get('video_path')
             source = VideoFileSource(source_type=source_type,source_id=source_id)
 
         else:

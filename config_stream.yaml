@@ -1,6 +1,11 @@
 streamer:
   sources:
-    - type: "video_file" # 视频
+    - type: "demo" # 基础示例
+      id: 'demo1'
+
+
+
+    - type: "video_file" # 本地视频文件
       id: "video_player"
       enable: True
       params:
