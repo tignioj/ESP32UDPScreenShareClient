@@ -1,3 +1,4 @@
+import random
 import time
 import sounddevice as sd
 import numpy as np
@@ -36,15 +37,15 @@ class AudioVisualizer:
         self.spectrum = np.zeros(self.BLOCK_SIZE // 2 + 1, dtype=np.float32)
         self.time_data = np.zeros(self.BLOCK_SIZE, dtype=np.float32)
         self.smoothed_spectrum = np.zeros(self.BLOCK_SIZE // 2 + 1, dtype=np.float32)
-        self.smoothing_factor = 0.7
+        self.smoothing_factor = 0.5
 
         # 律动检测参数
-        self.base_radius = min(self.WIDTH, self.HEIGHT) // 6  # 基础半径
+        self.base_radius = min(self.WIDTH, self.HEIGHT) // 4  # 基础半径
         self.max_radius_expansion = min(self.WIDTH, self.HEIGHT) // 8  # 最大扩张半径
         self.energy_history = np.zeros(10)  # 能量历史记录
         self.energy_index = 0
         self.current_radius = self.base_radius
-        self.radius_smoothing = 0.85  # 半径平滑因子
+        self.radius_smoothing = 0.9  # 半径平滑因子
 
         # 粒子系统
         self.particles = []
@@ -188,6 +189,95 @@ class AudioVisualizer:
                 blue = int(255 * (1 - color_ratio))
                 color = (blue,green,red)
                 cv2.line(img, points[i], points[i + 1], color, 2)
+    def _draw_circular_spectrum2(self, img: np.ndarray) -> None:
+        """效果：红蓝白电离，电离范围随着律动变化"""
+        num_points = 100
+        max_freq_index = min(len(self.spectrum), num_points)
+
+        if self.spectrum.max() > 0:
+            spec_normalized = self.spectrum[:max_freq_index] / self.spectrum.max()
+        else:
+            spec_normalized = self.spectrum[:max_freq_index]
+
+        points = []
+        points_blue = []
+        points_red = []
+        center_x, center_y = self.WIDTH // 2, self.HEIGHT // 2
+
+        # 使用动态计算的半径（基于音频律动）
+        radius = max(30, int(self.current_radius))  # 确保半径不小于10像素
+        # radius = int(self.current_radius)  # 确保半径不小于10像素
+
+        if radius > 30:
+            # 由于base_radius会根据律动自动变化，所以这里计算的random_offset也是随着律动变化的
+            # 这里取绝对值是因为后面的randint必须第一个数小于第二个数
+            random_offset = np.abs(radius - self.base_radius)
+            # 随机偏移的值
+            offset_x = random.randint(-random_offset,random_offset)
+            offset_y = random.randint(-random_offset,random_offset)
+        else:
+            offset_x = 0
+            offset_y = 0
+
+        for i in range(num_points):
+
+            angle = 2 * np.pi * i / num_points
+            freq_index = int(i * max_freq_index / num_points)
+            if freq_index >= len(spec_normalized):
+                continue
+
+            # 根据频谱强度调整每个点的长度
+            snf = int(spec_normalized[freq_index] * radius * 0.8)
+            nx = np.cos(angle)
+            ny = np.sin(angle)
+
+            point_length = radius + snf
+            point_length_blue = radius + snf
+            point_length_red = radius + snf
+
+            x = int(center_x + point_length * nx)
+            y = int(center_y + point_length * ny)
+
+            x_blue = int(center_x + point_length_blue * nx) + offset_x
+            y_blue = int(center_y + point_length_blue * ny) + offset_y
+
+            x_red = int(center_x + point_length_red * nx) - offset_x
+            y_red = int(center_y + point_length_red * ny) - offset_y
+
+            points.append((x, y))
+            points_blue.append((x_blue, y_blue))
+            points_red.append((x_red, y_red))
+
+            # if point_length > radius:
+            #     color_ratio = i / num_points
+            #     blue = int(255 * (1 - color_ratio))
+            #     red = int(255 * color_ratio)
+            #     # 根据律动强度调整线条粗细
+            #     line_thickness = max(1, min(3, int(2 + spec_normalized[freq_index] * 3)))
+            #     # line_thickness = 2
+            #     cv2.line(img, (center_x, center_y), (x, y), (blue, 100, red), line_thickness)
+            #
+        # 绘制外圆环（半径随律动变化）
+        if len(points) > 2:
+            thickness = 4
+            if offset_x == 0:
+                for i in range(len(points)):
+                    cv2.line(img, points[i], points[(i + 1) % len(points)], (255, 255, 255), thickness)
+            else:
+                # 先绘制蓝色，再绘制白色，最后绘制红色。三种颜色必须单独绘制，不能在一个循环内完整，否则会被覆盖
+                # 蓝色和红色的坐标有随机偏差，这样有视觉错觉，看起来像电离效果一样
+                for i in range(len(points)):
+                    cv2.line(img, points_blue[i], points_blue[(i + 1) % len(points_blue)], (255, 0, 0), thickness)
+
+                for i in range(len(points)):
+                    cv2.line(img, points[i], points[(i + 1) % len(points)], (255, 255, 255), thickness)
+
+                for i in range(len(points)):
+                    cv2.line(img, points_red[i], points_red[(i + 1) % len(points_red)], (0, 0, 255), thickness)
+
+        # 在圆心处添加一个随律动变化的小圆
+        # center_radius = max(4, int(5 + (self.current_radius - self.base_radius) / self.max_radius_expansion * 10))
+        # cv2.circle(img, (center_x, center_y), center_radius, (255, 255, 255), -1)
 
     def _draw_circular_spectrum(self, img: np.ndarray) -> None:
         """绘制圆形频谱图（现在半径会随律动变化）"""
@@ -299,10 +389,11 @@ class AudioVisualizer:
 
         # 绘制各种可视化效果[4](@ref)
         self._draw_waveform(img)
-        self._update_particles()
-        self._draw_particles(img)
         self._draw_spectrum_bars(img)
         # self._draw_circular_spectrum(img)  # 这个现在会随律动变化
+        self._draw_circular_spectrum2(img)  # 这个现在会随律动变化
+        self._update_particles()
+        self._draw_particles(img)
         # print(time.time() - t)
 
 
