@@ -5,6 +5,14 @@ streamer:
 
     - type: "audio_visualization"
       id: 'audio_visual1'
+      params:
+        draw_waveform: True # 特效：波形
+        draw_spectrum_bar: True # 特效：频谱柱
+        draw_spectrum_circular1: False # 圆环特效1：三个独立的律动圆
+        draw_spectrum_circular2: True  # 圆环特效2：红蓝白电离
+        draw_spectrum_circular3: False # 圆环特效3：白色动态圆环+内外双律动扩散
+        draw_particles: True # 特效：底部发射粒子
+
 
 
     - type: "video_file" # 本地视频文件

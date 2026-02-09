@@ -418,6 +418,7 @@ class AudioVisualizer:
                 # cv2.line(img, points[i], points[(i + 1) % len(points)], (0, 200, 255), 1)
                 cv2.line(img, points[i], points[(i + 1) % len(points)], (255, 255, 255), 3)
         circle_color = (255,255,255)
+        # circle_color = (100,255,225)
         if len(points_outer) > 2:
             for i in range(len(points_outer)):
                 cv2.line(img, points_outer[i], points_outer[(i + 1) % len(points_outer)], circle_color, 2)
@@ -453,7 +454,13 @@ class AudioVisualizer:
         for particle in self.particles:
             particle.draw(img)
 
-    def get_frame(self) -> np.ndarray:
+    def get_frame(self, draw_waveform=True,
+                  draw_spectrum_bar = True,
+                  draw_spectrum_circular1 = False,
+                  draw_spectrum_circular2 = True,
+                  draw_spectrum_circular3 = False,
+                  draw_particles = True
+                  ) -> np.ndarray:
         """
         获取当前可视化帧
 
@@ -463,18 +470,15 @@ class AudioVisualizer:
         # 创建背景
         # t = time.time()
         img = self.background.copy()
-
-        # 绘制各种可视化效果[4](@ref)
-        self._draw_waveform(img)
-        self._draw_spectrum_bars(img)
-        # self._draw_circular_spectrum(img)  # 三个环
-        # self._draw_circular_spectrum2(img)  # 红白蓝电离
-        self._draw_circular_spectrum3(img)  # 动态圆环+内外双律动扩散
-        self._update_particles()
-        self._draw_particles(img)
+        if draw_waveform: self._draw_waveform(img)
+        if draw_spectrum_bar: self._draw_spectrum_bars(img)
+        if draw_spectrum_circular1: self._draw_circular_spectrum(img)  # 三个环
+        if draw_spectrum_circular2: self._draw_circular_spectrum2(img)  # 红白蓝电离
+        if draw_spectrum_circular3: self._draw_circular_spectrum3(img)  # 动态圆环+内外双律动扩散
+        if draw_particles:
+            self._update_particles()
+            self._draw_particles(img)
         # print(time.time() - t)
-
-
         return img
 
     def release(self) -> None:
