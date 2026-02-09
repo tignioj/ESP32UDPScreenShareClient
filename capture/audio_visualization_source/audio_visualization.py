@@ -65,7 +65,8 @@ class AudioVisualizer:
             if target_name in dev['name']:
                 print(f"使用设备: {sd.query_devices()[i]['name']}")
                 return i
-        print("未找到指定设备，使用默认输入设备")
+        # print("未找到指定设备，使用默认输入设备")
+        print(f"未找到指定设备{target_name}，音频可视化不可用！请确保安装了此驱动https://vb-audio.com/Cable/")
         return None
 
     def _audio_callback(self, indata, frames, time, status):
