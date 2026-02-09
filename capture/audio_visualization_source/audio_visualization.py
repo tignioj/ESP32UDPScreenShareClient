@@ -195,7 +195,9 @@ class AudioVisualizer:
         max_freq_index = min(len(self.spectrum), num_points)
 
         if self.spectrum.max() > 0:
+            # spec_normalized = np.log1p(self.spectrum[:max_freq_index])
             spec_normalized = self.spectrum[:max_freq_index] / self.spectrum.max()
+            # spec_normalized = spec_normalized / spec_normalized.max()
         else:
             spec_normalized = self.spectrum[:max_freq_index]
 
@@ -348,6 +350,81 @@ class AudioVisualizer:
         # center_radius = max(4, int(5 + (self.current_radius - self.base_radius) / self.max_radius_expansion * 10))
         # cv2.circle(img, (center_x, center_y), center_radius, (255, 255, 255), -1)
 
+    def _draw_circular_spectrum3(self,img: np.ndarray) -> None:
+        """绘制圆形频谱图"""
+        spectrum = self.spectrum
+        BAR_LEN = 50
+        # 取频谱并压缩动态范围
+        center_x, center_y = self.WIDTH // 2, self.HEIGHT // 2
+        radius = max(30, int(self.current_radius))  # 确保半径不小于10像素
+        # radius = 50
+        spec = spectrum[5:185]  # 去掉直流 & 超高频
+        spec = np.log1p(spec)
+        spec /= (spec.max() + 1e-6)
+
+        n = len(spec)
+
+        # 低频能量 → 呼吸
+        bass = np.mean(spec[:20])
+        dynamic_radius = radius + int(bass * 40)
+        points_outer = []
+        points = []
+        points_inner = []
+
+        for i, v in enumerate(spec):
+            angle = 2 * np.pi * i / n
+            # 从频谱数据获得动态长度
+            length = int(v * BAR_LEN)
+            # if length > 30: length = 30
+
+            r1 = dynamic_radius
+            r_outer = dynamic_radius + length
+            r_inner = dynamic_radius - length
+
+            # 动态半径圆
+            x1 = int(center_x + r1 * np.cos(angle))
+            y1 = int(center_y + r1 * np.sin(angle))
+            points.append((x1,y1))
+
+            # 动态半径+动态长度的外圆
+            x2 = int(center_x + r_outer * np.cos(angle))
+            y2 = int(center_y + r_outer * np.sin(angle))
+            points_outer.append((x2, y2))
+
+            # 动态半径+动态长度的内圆
+            x_inner = int(center_x + r_inner * np.cos(angle))
+            y_inner = int(center_y + r_inner * np.sin(angle))
+            points_inner.append((x_inner, y_inner))
+
+            # 频率 → 颜色
+            # hue = int(180 + 75 * i / n)
+            hue = int(100 + 75 * i / n)
+
+            bgr = cv2.cvtColor(
+                np.uint8([[[hue, 255, 255]]]),
+                cv2.COLOR_HSV2BGR
+            )[0][0]
+
+            # color = (int(bgr[0]), int(bgr[1]), int(bgr[2]))
+            # color = (255,255,255)
+
+            # cv2.line(img, (x1, y1), (x2, y2), color, 2)
+            # cv2.line(img, (x1, y1), (x_inner, y_inner), color, 2)
+            # cv2.line(img, (x2, y2), (x_inner, y_inner), color, 2)
+
+        # 连接频谱点形成封闭图形
+        if len(points) > 2:
+            for i in range(len(points)):
+                # cv2.line(img, points[i], points[(i + 1) % len(points)], (0, 200, 255), 1)
+                cv2.line(img, points[i], points[(i + 1) % len(points)], (255, 255, 255), 3)
+        circle_color = (255,255,255)
+        if len(points_outer) > 2:
+            for i in range(len(points_outer)):
+                cv2.line(img, points_outer[i], points_outer[(i + 1) % len(points_outer)], circle_color, 2)
+        if len(points_inner) > 2:
+            for i in range(len(points_inner)):
+                cv2.line(img, points_inner[i], points_inner[(i + 1) % len(points_inner)], circle_color, 2)
+
     def _update_particles(self) -> None:
         """更新粒子系统[2](@ref)"""
         # 根据频谱强度和律动强度生成新粒子
@@ -390,8 +467,9 @@ class AudioVisualizer:
         # 绘制各种可视化效果[4](@ref)
         self._draw_waveform(img)
         self._draw_spectrum_bars(img)
-        # self._draw_circular_spectrum(img)  # 这个现在会随律动变化
-        self._draw_circular_spectrum2(img)  # 这个现在会随律动变化
+        # self._draw_circular_spectrum(img)  # 三个环
+        # self._draw_circular_spectrum2(img)  # 红白蓝电离
+        self._draw_circular_spectrum3(img)  # 动态圆环+内外双律动扩散
         self._update_particles()
         self._draw_particles(img)
         # print(time.time() - t)
