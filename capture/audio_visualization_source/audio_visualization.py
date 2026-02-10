@@ -298,7 +298,7 @@ class AudioVisualizer:
         center_x, center_y = self.WIDTH // 2, self.HEIGHT // 2
 
         # 使用动态计算的半径（基于音频律动）
-        radius = max(30, int(self.current_radius))  # 确保半径不小于10像素
+        radius = max(30, int(self.current_radius)-20)  # 确保半径不小于30像素
 
         for i in range(num_points):
 
@@ -357,7 +357,7 @@ class AudioVisualizer:
         BAR_LEN = 50
         # 取频谱并压缩动态范围
         center_x, center_y = self.WIDTH // 2, self.HEIGHT // 2
-        radius = max(30, int(self.current_radius))  # 确保半径不小于10像素
+        radius = max(30, int(self.current_radius)-5)  # 确保半径不小于10像素
         # radius = 50
         spec = spectrum[5:185]  # 去掉直流 & 超高频
         spec = np.log1p(spec)
@@ -530,7 +530,13 @@ class AudioVisualizer:
 if __name__ == '__main__':
     av = AudioVisualizer(width=240, height=240, block_size=512)
     while True:
-        cv2.imshow('av', av.get_frame())
+        cv2.imshow('av', av.get_frame(
+            draw_spectrum_bar=True,
+            draw_spectrum_circular1=False,
+            draw_spectrum_circular2=False,
+            draw_spectrum_circular3=True,
+            draw_particles=True,
+        ))
         key = cv2.waitKey(1)
         if key == ord('q'):
             break
