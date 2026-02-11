@@ -31,6 +31,7 @@ class AudioVisualizer:
         self.WIDTH = width
         self.HEIGHT = height
         self.CHANNELS = channels
+        self.NOISE_FLOOR = 1e-8  # 可调，VB-Cable 通常在 1e-4 ~ 1e-3
 
         # 音频数据缓冲区
         self.window = np.hanning(self.BLOCK_SIZE)
@@ -69,6 +70,9 @@ class AudioVisualizer:
         print(f"未找到指定设备{target_name}，音频可视化不可用！请确保安装了此驱动https://vb-audio.com/Cable/, 并设置系统声音输出为CableInput")
         return None
 
+    def _should_show_screen_saver(self):
+        return None
+
     def _audio_callback(self, indata, frames, time, status):
         """音频回调函数，处理输入的音频数据[1](@ref)"""
         if status:
@@ -76,7 +80,13 @@ class AudioVisualizer:
 
         # 取左声道数据
         mono = indata[:, 0].copy()
-
+        energy = np.mean(mono ** 2)
+        if energy < self.NOISE_FLOOR:
+            self.spectrum[:] = 0
+            self.time_data[:] = 0
+            self.current_radius = self.base_radius
+            self.smoothed_spectrum = np.zeros(self.BLOCK_SIZE // 2 + 1, dtype=np.float32)
+            return
         # 时域数据用于波形显示
         self.time_data = mono
 
