@@ -60,6 +60,9 @@ class AudioVisualizer:
         # 可视化参数
         self.background = self._create_gradient_background()
 
+        # 绘制时间
+        self.last_sound_time = time.time()
+
     def _find_audio_device(self, target_name: str) -> int:
         """查找音频设备"""
         for i, dev in enumerate(sd.query_devices()):
@@ -135,11 +138,12 @@ class AudioVisualizer:
     def _create_gradient_background(self) -> np.ndarray:
         """创建渐变背景"""
         background = np.zeros((self.HEIGHT, self.WIDTH, 3), dtype=np.uint8)
-        for y in range(self.HEIGHT):
-            blue = int(10 + (y / self.HEIGHT) * 30)
-            green = int(5 + (y / self.HEIGHT) * 20)
-            red = int(5 + (y / self.HEIGHT) * 15)
-            background[y, :] = (blue, green, red)
+        # background.fill(255)
+        # for y in range(self.HEIGHT):
+            # blue = int(10 + (y / self.HEIGHT) * 30)
+            # green = int(5 + (y / self.HEIGHT) * 20)
+            # red = int(5 + (y / self.HEIGHT) * 15)
+            # background[y, :] = (blue, green, red)
         return background
 
     def _draw_spectrum_bars(self, img: np.ndarray) -> None:
@@ -480,6 +484,14 @@ class AudioVisualizer:
         """
         # 创建背景
         # t = time.time()
+
+        # 静音时1秒内返回静音时候的图片，若超过1秒仍然没数据时，返回空白。
+        if self.spectrum.max() <= 0:
+            if time.time() - self.last_sound_time > 1:
+                return None
+        else:
+            self.last_sound_time = time.time()
+
         img = self.background.copy()
         if draw_waveform: self._draw_waveform(img)
         if draw_spectrum_bar: self._draw_spectrum_bars(img)
