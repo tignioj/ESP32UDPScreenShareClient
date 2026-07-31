@@ -67,7 +67,12 @@ class YAMLConfigEditor:
         # UDP推流相关
         self.streaming = False
         self.stream_thread = None
+        self.stream_stop_event = None
         self.sock = None
+        # Keep frame IDs monotonic across UI stop/start cycles. Starting from a
+        # process-specific value also reduces collisions after an app restart.
+        self.frame_id = time.time_ns() & 0xFFFF
+        self.frame_id_lock = threading.Lock()
 
         # 默认配置文件
         self.config_file = "config.yaml"
@@ -1024,6 +1029,14 @@ class YAMLConfigEditor:
             messagebox.showerror("错误", "UDP推流模块不可用，请安装必要的依赖库")
             return
 
+        # A stopped worker owns its Event and must fully exit before another
+        # worker is started. Otherwise rapid stop/start can create two senders.
+        if self.stream_thread and self.stream_thread.is_alive():
+            self.stream_thread.join(timeout=0.5)
+            if self.stream_thread.is_alive():
+                messagebox.showwarning("等待停止", "上一个推流线程正在停止，请稍后再试。")
+                return
+
         # 验证配置
         errors = self.validate_inputs()
         if errors:
@@ -1050,9 +1063,11 @@ class YAMLConfigEditor:
 
         # 开始推流线程
         self.streaming = True
+        stop_event = threading.Event()
+        self.stream_stop_event = stop_event
         self.stream_thread = threading.Thread(
             target=self.stream_udp_data,
-            args=(server_ip, server_port, width, color_mode_str, lines_per_packet, udp_interval),
+            args=(server_ip, server_port, width, color_mode_str, lines_per_packet, udp_interval, stop_event),
             daemon=True
         )
         self.stream_thread.start()
@@ -1063,6 +1078,8 @@ class YAMLConfigEditor:
     def stop_streaming(self):
         """停止UDP推流"""
         self.streaming = False
+        if self.stream_stop_event is not None:
+            self.stream_stop_event.set()
 
         # 启用开始按钮，禁用停止按钮
         self.start_button.config(state=tk.NORMAL)
@@ -1079,7 +1096,7 @@ class YAMLConfigEditor:
         b_332 = (b >> 6) & 0x03
         return (r_332 << 5) | (g_332 << 2) | b_332
 
-    def stream_udp_data(self, server_ip, server_port, width, color_mode_str, lines_per_packet, udp_interval):
+    def stream_udp_data(self, server_ip, server_port, width, color_mode_str, lines_per_packet, udp_interval, stop_event):
         """UDP推流线程函数"""
         try:
             # 初始化UDP socket
@@ -1105,13 +1122,12 @@ class YAMLConfigEditor:
             self.log_message(
                 f"Header参数: 分辨率代码={resolution_code}, 颜色代码={color_mode_code}, 每包行数={lines_per_packet}")
 
-            frame_id = 0
             last_frame_time = time.perf_counter()
             stats_started = time.perf_counter()
             stats_frames = 0
             stats_packets = 0
             stats_bytes = 0
-            while self.streaming:
+            while not stop_event.is_set():
                 try:
                     # 捕获屏幕
                     # sc = cap.capture_window_by_title("原神", mss_mode=False)
@@ -1138,7 +1154,9 @@ class YAMLConfigEditor:
                         # RGB565转换
                         rgb = cv2.cvtColor(sc, cv2.COLOR_BGR2BGR565)
 
-                    frame_id = (frame_id + 1) & 0xFFFF
+                    with self.frame_id_lock:
+                        self.frame_id = (self.frame_id + 1) & 0xFFFF
+                        frame_id = self.frame_id
                     frame_blob = np.ascontiguousarray(rgb).tobytes()
                     row_bytes = width * (2 if color_mode_code == ESP32UDPHeader.COLOR_RGB565 else 1)
                     next_packet_at = time.perf_counter()
@@ -1172,7 +1190,7 @@ class YAMLConfigEditor:
                         next_packet_at += udp_interval
 
                         # 检查是否应该停止
-                        if not self.streaming:
+                        if stop_event.is_set():
                             break
 
                     stats_frames += 1
