@@ -18,6 +18,8 @@
 
 找到`_internal/config_stream.yaml`文件，里面有多个示例，每一个source都是一个“视频流”配置。
 
+程序启动后，主界面的“图像源”下拉框会列出所有已启用且初始化成功的 source。选择一项即可立即切换，推流过程中也可以切换，无需停止后重新启动。
+
 ## 配置说明
 - type 可选值：`screen|video_file|audio_visualization|rtsp|camera`
 - screen 表示截图视频源

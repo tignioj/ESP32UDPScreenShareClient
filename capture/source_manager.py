@@ -1,3 +1,4 @@
+import threading
 from typing import Optional, List, Dict, Any
 
 import numpy as np
@@ -17,6 +18,9 @@ class SourceManager:
     def __init__(self):
         self._sources = {}  # source_id -> ImageSourceInterface
         self._active_source_id = None
+        # UI 可以在推流线程正在取帧时切换源。用同一把锁保护取帧和
+        # stop/start，避免旧源在 capture() 过程中被停止或释放。
+        self._source_lock = threading.RLock()
 
     def create_source(self, source_type: SourceType,
                       source_id: str = "", **kwargs) -> Optional[str]:
@@ -67,27 +71,43 @@ class SourceManager:
 
     def get_source(self, source_id: str = None) -> Optional[ImageSourceInterface]:
         """获取图像源"""
-        if source_id is None:
-            source_id = self._active_source_id
+        with self._source_lock:
+            if source_id is None:
+                source_id = self._active_source_id
 
-        return self._sources.get(source_id)
+            return self._sources.get(source_id)
 
     def switch_source(self, source_id: str) -> bool:
         """切换活动图像源"""
-        if source_id not in self._sources:
-            return False
+        with self._source_lock:
+            if source_id not in self._sources:
+                return False
 
-        # 停止当前源
-        current = self.get_source()
-        if current:
-            current.stop()
+            current = self.get_source()
+            new_source = self._sources[source_id]
 
-        # 启动新源
-        self._active_source_id = source_id
-        new_source = self._sources[source_id]
-        new_source.start()
+            # 已经在使用这个源时无需重新启动，以免视频等源被重置。
+            if current is new_source and current._is_running:
+                return True
 
-        return True
+            if current:
+                current.stop()
+
+            self._active_source_id = source_id
+            new_source.start()
+            return True
+
+    def list_configured_sources(self) -> List[Dict[str, Any]]:
+        """列出已经成功初始化、可供运行时切换的配置源。"""
+        with self._source_lock:
+            return [
+                {
+                    'id': source_id,
+                    'type': source.source_type.value,
+                    'active': source_id == self._active_source_id
+                }
+                for source_id, source in self._sources.items()
+            ]
 
     def list_sources(self) -> List[Dict[str, Any]]:
         """列出所有可用的图像源"""
@@ -122,19 +142,21 @@ class SourceManager:
 
     def capture_frame(self, source_id: str = None) -> Optional[np.ndarray]:
         """从指定源捕获一帧"""
-        source = self.get_source(source_id)
-        if not source:
-            return None
+        with self._source_lock:
+            source = self.get_source(source_id)
+            if not source:
+                return None
 
-        return source.capture()
+            return source.capture()
 
     def cleanup(self):
         """清理所有资源"""
-        for source_id, source in self._sources.items():
-            try:
-                source.release()
-            except Exception as e:
-                print(f"Error releasing source {source_id}: {e}")
+        with self._source_lock:
+            for source_id, source in self._sources.items():
+                try:
+                    source.release()
+                except Exception as e:
+                    print(f"Error releasing source {source_id}: {e}")
 
-        self._sources.clear()
-        self._active_source_id = None
+            self._sources.clear()
+            self._active_source_id = None

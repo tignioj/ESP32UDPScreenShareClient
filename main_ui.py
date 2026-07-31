@@ -35,7 +35,7 @@ class YAMLConfigEditor:
         print("==================================================================================================================")
         self.root = root
         self.root.title("YAML 配置文件编辑器V0.0.5")
-        self.root.geometry("700x650")  # 稍微增加高度以容纳更多预设
+        self.root.geometry("700x710")
 
         # UDP推流相关
         self.streaming = False
@@ -114,10 +114,15 @@ class YAMLConfigEditor:
         # 预设变量
         self.preset_var = tk.StringVar(value="")
 
+        # 图像源选择
+        self.source_var = tk.StringVar(value="")
+        self.source_id_by_label = {}
+
         # 日志文本框
         self.log_text = None
 
         self.setup_ui()
+        self.refresh_source_list()
         self.load_config()
 
         # 绑定关闭事件
@@ -210,9 +215,31 @@ class YAMLConfigEditor:
         ttk.Label(config_frame, text="(0.0001-0.1)").grid(row=row, column=2, sticky=tk.W, padx=5, pady=2)
         row += 1
 
+        # 图像源切换
+        source_frame = ttk.LabelFrame(main_frame, text="图像源", padding="5")
+        source_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        source_frame.columnconfigure(1, weight=1)
+
+        ttk.Label(source_frame, text="当前源:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
+        self.source_combo = ttk.Combobox(
+            source_frame,
+            textvariable=self.source_var,
+            state="readonly",
+            width=42
+        )
+        self.source_combo.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=5)
+        self.source_combo.bind("<<ComboboxSelected>>", self.on_source_selected)
+
+        self.switch_source_button = ttk.Button(
+            source_frame,
+            text="切换",
+            command=self.switch_source
+        )
+        self.switch_source_button.grid(row=0, column=2, padx=(5, 0))
+
         # 按钮框架
         button_frame = ttk.Frame(main_frame)
-        button_frame.grid(row=3, column=0, columnspan=2, pady=10)
+        button_frame.grid(row=4, column=0, columnspan=2, pady=10)
 
         ttk.Button(button_frame, text="保存配置", command=self.save_config).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="重置为默认", command=self.reset_to_default).pack(side=tk.LEFT, padx=5)
@@ -220,7 +247,7 @@ class YAMLConfigEditor:
 
         # 推流控制按钮
         stream_frame = ttk.Frame(main_frame)
-        stream_frame.grid(row=4, column=0, columnspan=2, pady=10)
+        stream_frame.grid(row=5, column=0, columnspan=2, pady=10)
 
         self.start_button = ttk.Button(stream_frame, text="开始推流",
                                        command=self.start_streaming,
@@ -234,7 +261,7 @@ class YAMLConfigEditor:
 
         # 添加日志显示区域
         log_frame = ttk.LabelFrame(main_frame, text="日志", padding="5")
-        log_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(10, 0))
+        log_frame.grid(row=6, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(10, 0))
 
         self.log_text = scrolledtext.ScrolledText(log_frame, height=8, width=70)
         self.log_text.pack(expand=True, fill=tk.BOTH)
@@ -243,7 +270,7 @@ class YAMLConfigEditor:
         # 状态栏
         self.status_var = tk.StringVar(value="就绪")
         status_bar = ttk.Label(main_frame, textvariable=self.status_var, relief=tk.SUNKEN)
-        status_bar.grid(row=6, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
+        status_bar.grid(row=7, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
 
         # 配置网格权重
         main_frame.columnconfigure(0, weight=1)
@@ -255,6 +282,65 @@ class YAMLConfigEditor:
         if not UDP_MODULES_AVAILABLE:
             self.log_message("警告: UDP推流模块不可用，请确保安装了必要的依赖库")
             self.log_message("需要安装: pip install opencv-python numpy mss")
+
+    def refresh_source_list(self):
+        """把 config_stream.yaml 中成功加载的源显示到下拉框。"""
+        self.source_id_by_label.clear()
+
+        if not UDP_MODULES_AVAILABLE or streamer is None:
+            self.source_combo.configure(values=(), state=tk.DISABLED)
+            self.switch_source_button.configure(state=tk.DISABLED)
+            return
+
+        try:
+            sources = streamer.list_configured_sources()
+            labels = []
+            active_label = None
+
+            for source in sources:
+                label = f"{source['id']} ({source['type']})"
+                labels.append(label)
+                self.source_id_by_label[label] = source['id']
+                if source.get('active'):
+                    active_label = label
+
+            self.source_combo.configure(values=labels)
+            if labels:
+                self.source_combo.configure(state="readonly")
+                self.switch_source_button.configure(state=tk.NORMAL)
+                self.source_var.set(active_label or labels[0])
+            else:
+                self.source_combo.configure(state=tk.DISABLED)
+                self.switch_source_button.configure(state=tk.DISABLED)
+                self.source_var.set("")
+                self.log_message("没有成功加载的图像源，请检查 config_stream.yaml")
+        except Exception as e:
+            self.source_combo.configure(values=(), state=tk.DISABLED)
+            self.switch_source_button.configure(state=tk.DISABLED)
+            self.log_message(f"读取图像源失败: {str(e)}")
+
+    def on_source_selected(self, event=None):
+        """选择下拉项后立即切换。"""
+        self.switch_source()
+
+    def switch_source(self):
+        """切换 streamer 当前使用的图像源，推流中也可调用。"""
+        label = self.source_var.get()
+        source_id = self.source_id_by_label.get(label)
+        if not source_id:
+            messagebox.showwarning("提示", "请先选择一个图像源")
+            return
+
+        try:
+            if streamer.switch_source(source_id):
+                self.log_message(f"已切换图像源: {source_id}")
+                self.status_var.set(f"当前图像源: {source_id}")
+            else:
+                messagebox.showerror("错误", f"图像源不存在或不可用: {source_id}")
+                self.refresh_source_list()
+        except Exception as e:
+            messagebox.showerror("错误", f"切换图像源失败: {str(e)}")
+            self.log_message(f"切换图像源失败: {str(e)}")
 
     def log_message(self, message):
         """添加消息到日志框"""

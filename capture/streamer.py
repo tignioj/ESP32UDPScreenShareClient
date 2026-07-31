@@ -64,6 +64,10 @@ class Streamer:
         """列出可用图像源"""
         return self.source_manager.list_sources()
 
+    def list_configured_sources(self) -> List[Dict[str, Any]]:
+        """列出配置文件中已成功初始化、可切换的图像源。"""
+        return self.source_manager.list_configured_sources()
+
     def get_source_info(self, source_id: str = None) -> Dict[str, Any]:
         """获取当前源信息"""
         source = self.source_manager.get_source(source_id)
