@@ -55,13 +55,35 @@ class YAMLConfigEditor:
         '全效果': set(AUDIO_EFFECTS),
     }
     AUDIO_PARAMETERS = {
-        'gain': ('灵敏度', 0.1, 4.0, 0.1, 1),
-        'spectrum_smoothing': ('频谱平滑', 0.0, 0.95, 0.05, 2),
-        'radius_smoothing': ('律动平滑', 0.0, 0.98, 0.02, 2),
-        'base_radius': ('基础半径', 20, 100, 1, 0),
-        'radius_expansion': ('律动幅度', 5, 100, 1, 0),
-        'max_particles': ('粒子数量', 0, 500, 10, 0),
+        'gain': ('音量灵敏度', 0.1, 4.0, 0.1, 1),
+        'spectrum_smoothing': ('变化平滑度', 0.0, 0.95, 0.05, 2),
+        'radius_smoothing': ('律动平滑度', 0.0, 0.98, 0.02, 2),
+        'base_radius': ('圆环基础大小', 20, 100, 1, 0),
+        'radius_expansion': ('随节奏扩张', 5, 100, 1, 0),
+        'max_particles': ('最大粒子数', 0, 500, 10, 0),
     }
+    AUDIO_PARAMETER_GROUPS = (
+        (
+            '输入响应',
+            '作用于：全部已启用效果',
+            ('gain',),
+        ),
+        (
+            '频谱动态',
+            '作用于：频谱柱、霓虹镜像、极光山脉、放射星芒、频谱瀑布',
+            ('spectrum_smoothing',),
+        ),
+        (
+            '圆环与律动',
+            '作用于：三重圆环、红蓝电离、双向律动，以及粒子的律动强度',
+            ('radius_smoothing', 'base_radius', 'radius_expansion'),
+        ),
+        (
+            '粒子效果',
+            '作用于：粒子',
+            ('max_particles',),
+        ),
+    )
 
     def __init__(self, root):
         print("==================================================================================================================")
@@ -345,12 +367,11 @@ class YAMLConfigEditor:
         self.screen_controls_frame.grid_remove()
 
         # 仅在选中 audio_visualization 源时显示。
-        self.audio_controls_frame = ttk.LabelFrame(source_frame, text="音频视觉效果（实时生效）", padding="6")
+        self.audio_controls_frame = ttk.LabelFrame(source_frame, text="音频视觉效果（实时生效）", padding="8")
         self.audio_controls_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(8, 0))
         self.audio_controls_frame.columnconfigure(1, weight=1)
-        self.audio_controls_frame.columnconfigure(4, weight=1)
 
-        ttk.Label(self.audio_controls_frame, text="效果组合:").grid(row=0, column=0, sticky=tk.W)
+        ttk.Label(self.audio_controls_frame, text="效果预设:").grid(row=0, column=0, sticky=tk.W)
         self.audio_preset_combo = ttk.Combobox(
             self.audio_controls_frame,
             textvariable=self.audio_preset_var,
@@ -360,38 +381,74 @@ class YAMLConfigEditor:
         )
         self.audio_preset_combo.grid(row=0, column=1, sticky=tk.W, padx=(5, 12))
         self.audio_preset_combo.bind("<<ComboboxSelected>>", self.on_audio_preset_selected)
-        ttk.Label(self.audio_controls_frame, text="也可自由叠加:").grid(row=0, column=2, sticky=tk.W)
+        ttk.Label(
+            self.audio_controls_frame,
+            text="选择预设会替换下方勾选；参数调整不会切换效果。",
+            foreground="#666666",
+        ).grid(row=0, column=2, sticky=tk.W)
 
-        effects_frame = ttk.Frame(self.audio_controls_frame)
-        effects_frame.grid(row=0, column=3, columnspan=3, sticky=tk.W)
+        effects_frame = ttk.LabelFrame(
+            self.audio_controls_frame,
+            text="1. 选择画面效果（可多选叠加）",
+            padding=(8, 5),
+        )
+        effects_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(8, 0))
+        for column in range(5):
+            effects_frame.columnconfigure(column, weight=1)
         for index, (name, label) in enumerate(self.AUDIO_EFFECTS.items()):
             ttk.Checkbutton(
                 effects_frame,
                 text=label,
                 variable=self.audio_effect_vars[name],
                 command=lambda effect=name: self.on_audio_effect_changed(effect),
-            ).grid(row=index // 3, column=index % 3, sticky=tk.W, padx=(0, 8))
+            ).grid(row=index // 5, column=index % 5, sticky=tk.W, padx=(0, 8), pady=2)
 
-        for index, (name, (label, minimum, maximum, step, digits)) in enumerate(self.AUDIO_PARAMETERS.items()):
-            row_index = 1 + index // 2
-            column_index = (index % 2) * 3
-            ttk.Label(self.audio_controls_frame, text=f"{label}:").grid(
-                row=row_index, column=column_index, sticky=tk.W, pady=(5, 0)
+        ttk.Label(
+            self.audio_controls_frame,
+            text="2. 调整效果参数（每组已标明作用对象）",
+        ).grid(row=2, column=0, columnspan=3, sticky=tk.W, pady=(9, 3))
+
+        parameters_frame = ttk.Frame(self.audio_controls_frame)
+        parameters_frame.grid(row=3, column=0, columnspan=3, sticky=(tk.W, tk.E))
+        parameters_frame.columnconfigure(0, weight=1, uniform="audio_parameter_group")
+        parameters_frame.columnconfigure(1, weight=1, uniform="audio_parameter_group")
+
+        for group_index, (group_name, target_text, parameter_names) in enumerate(self.AUDIO_PARAMETER_GROUPS):
+            group_frame = ttk.LabelFrame(parameters_frame, text=group_name, padding=(7, 5))
+            group_frame.grid(
+                row=group_index // 2,
+                column=group_index % 2,
+                sticky=(tk.W, tk.E, tk.N, tk.S),
+                padx=(0, 4) if group_index % 2 == 0 else (4, 0),
+                pady=(0, 4) if group_index < 2 else (4, 0),
             )
-            scale = ttk.Scale(
-                self.audio_controls_frame,
-                from_=minimum,
-                to=maximum,
-                variable=self.audio_parameter_vars[name],
-                command=lambda value, parameter=name: self.on_audio_parameter_changed(parameter, value),
-            )
-            scale.grid(row=row_index, column=column_index + 1, sticky=(tk.W, tk.E), padx=5, pady=(5, 0))
+            group_frame.columnconfigure(1, weight=1)
             ttk.Label(
-                self.audio_controls_frame,
-                textvariable=self.audio_parameter_value_vars[name],
-                width=5,
-                anchor=tk.E,
-            ).grid(row=row_index, column=column_index + 2, sticky=tk.E, pady=(5, 0))
+                group_frame,
+                text=target_text,
+                foreground="#666666",
+                wraplength=300,
+            ).grid(row=0, column=0, columnspan=3, sticky=tk.W, pady=(0, 3))
+
+            for row_index, name in enumerate(parameter_names, start=1):
+                label, minimum, maximum, _, _ = self.AUDIO_PARAMETERS[name]
+                ttk.Label(group_frame, text=f"{label}:").grid(
+                    row=row_index, column=0, sticky=tk.W, pady=2
+                )
+                scale = ttk.Scale(
+                    group_frame,
+                    from_=minimum,
+                    to=maximum,
+                    variable=self.audio_parameter_vars[name],
+                    command=lambda value, parameter=name: self.on_audio_parameter_changed(parameter, value),
+                )
+                scale.grid(row=row_index, column=1, sticky=(tk.W, tk.E), padx=5, pady=2)
+                ttk.Label(
+                    group_frame,
+                    textvariable=self.audio_parameter_value_vars[name],
+                    width=5,
+                    anchor=tk.E,
+                ).grid(row=row_index, column=2, sticky=tk.E, pady=2)
 
         self.audio_controls_frame.grid_remove()
 

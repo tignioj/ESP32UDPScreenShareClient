@@ -300,29 +300,54 @@ class AudioVisualizer:
 
     def _draw_starburst(self, img: np.ndarray) -> None:
         """Radial starburst with mirrored frequency bands and neon bloom."""
-        rays = 96
-        half = rays // 2
-        source = self._get_frequency_bands(half, 'starburst')
-        bands = np.concatenate((source, source[::-1]))
+        # Smooth neighbouring frequency buckets before mirroring.  Temporal
+        # smoothing alone cannot prevent adjacent ray endpoints from jumping.
+        source = self._get_frequency_bands(40, 'starburst')
+        source = cv2.GaussianBlur(source.reshape(1, -1), (9, 1), 0).ravel()
+        # Repeat the same low-to-high profile in four mirrored quadrants.  A
+        # single half-circle mapping puts bass at the top and treble at the
+        # bottom, making normal music look permanently top-heavy.
+        control = np.concatenate((source, source[::-1], source, source[::-1]))
+
+        # Interpolate the control values to a denser circular profile.  The
+        # repeated first value makes the interpolation continuous at 0/360°.
+        rays = 192
+        control_x = np.arange(len(control) + 1, dtype=np.float32)
+        ray_x = np.linspace(0, len(control), rays, endpoint=False, dtype=np.float32)
+        bands = np.interp(ray_x, control_x, np.append(control, control[0]))
+
+        # Keep the silhouette circular: full-spectrum energy drives most of the
+        # radius uniformly, while individual bands only add smaller local rays.
+        # This prevents bass-heavy or treble-light music from pinching an axis.
+        global_level = float(np.sqrt(np.mean(source ** 2)))
+        bands = global_level * 0.70 + bands * 0.30
         center = (self.WIDTH // 2, self.HEIGHT // 2)
         base_radius = max(24, int(min(self.WIDTH, self.HEIGHT) * 0.19))
         max_length = int(min(self.WIDTH, self.HEIGHT) * 0.28)
         glow = np.zeros_like(img)
         crisp = np.zeros_like(img)
+        outer_points = []
 
         for i, value in enumerate(bands):
             angle = 2.0 * np.pi * i / rays - np.pi / 2
             nx, ny = np.cos(angle), np.sin(angle)
             inner = base_radius + int(3 * np.sin(angle * 5))
-            outer = inner + 3 + int((value ** 0.72) * max_length)
+            # A near-linear response avoids exaggerating tiny bin differences.
+            outer = inner + 3 + int((value ** 0.95) * max_length)
             p1 = (int(center[0] + nx * inner), int(center[1] + ny * inner))
             p2 = (int(center[0] + nx * outer), int(center[1] + ny * outer))
+            outer_points.append(p2)
             hue = int((i / rays) * 179)
             bgr = cv2.cvtColor(np.uint8([[[hue, 235, 255]]]), cv2.COLOR_HSV2BGR)[0, 0]
             color = tuple(int(channel) for channel in bgr)
             cv2.line(glow, p1, p2, color, 4, cv2.LINE_AA)
             cv2.line(crisp, p1, p2, color, 1, cv2.LINE_AA)
 
+        # A closed contour visually unifies the ray endpoints into one smooth
+        # outer halo while the individual coloured rays remain visible beneath.
+        contour = np.asarray(outer_points, dtype=np.int32).reshape(-1, 1, 2)
+        cv2.polylines(glow, [contour], True, (255, 120, 255), 4, cv2.LINE_AA)
+        cv2.polylines(crisp, [contour], True, (255, 235, 255), 1, cv2.LINE_AA)
         cv2.circle(glow, center, base_radius, (255, 170, 255), 4, cv2.LINE_AA)
         self._add_glow(img, glow, sigma=6.0, strength=0.8)
         cv2.add(img, crisp, dst=img)
