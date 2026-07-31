@@ -78,8 +78,8 @@ class YAMLConfigEditor:
             'server_port': 8888,
             'resolution': [240, 240],
             'color_mode': "rgb332",
-            'lines_per_packet': 3,
-            'udp_interval': 0.0002
+            'lines_per_packet': 6,
+            'udp_interval': 0.001
         }
 
         # 预设配置 - 根据Header常量修正颜色模式值
@@ -88,19 +88,19 @@ class YAMLConfigEditor:
                 'resolution': 240,  # ESP32UDPHeader.RES_240 = 0
                 'color_mode': 0,  # ESP32UDPHeader.COLOR_RGB565 = 0
                 'lines_per_packet': 3,
-                'udp_interval': 0.0003
+                'udp_interval': 0.00075
             },
             "预设2: 高清低彩": {
                 'resolution': 240,  # ESP32UDPHeader.RES_240 = 0
                 'color_mode': 1,  # ESP32UDPHeader.COLOR_RGB332 = 1
                 'lines_per_packet': 6,
-                'udp_interval': 0.0005
+                'udp_interval': 0.001
             },
             "预设3: 中清高彩": {
                 'resolution': 180,  # ESP32UDPHeader.RES_180 = 1
                 'color_mode': 0,  # ESP32UDPHeader.COLOR_RGB565 = 0
                 'lines_per_packet': 4,
-                'udp_interval': 0.0005
+                'udp_interval': 0.001
             },
             "预设4: 中清低彩": {
                 'resolution': 180,  # ESP32UDPHeader.RES_180 = 1
@@ -108,7 +108,7 @@ class YAMLConfigEditor:
                 # 'lines_per_packet': 8,
                 # 'udp_interval': 0.001
                 'lines_per_packet': 6,
-                'udp_interval': 0.00075
+                'udp_interval': 0.001
             },
             "预设5: 低清高彩": {
                 'resolution': 120,  # ESP32UDPHeader.RES_120 = 2
@@ -116,13 +116,13 @@ class YAMLConfigEditor:
                 # 'lines_per_packet': 6,
                 # 'udp_interval': 0.000945
                 'lines_per_packet': 4,
-                'udp_interval': 0.00075
+                'udp_interval': 0.001
             },
             "预设6: 低清低彩": {  # 新增预设6
                 'resolution': 120,  # ESP32UDPHeader.RES_120 = 2
                 'color_mode': 1,  # ESP32UDPHeader.COLOR_RGB332 = 1
                 'lines_per_packet': 4,
-                'udp_interval': 0.00075
+                'udp_interval': 0.001
             }
         }
 
@@ -885,6 +885,13 @@ class YAMLConfigEditor:
             lines = int(self.entries['lines_per_packet'].get())
             if not (1 <= lines <= 8):
                 errors.append("每包行数必须在1-8之间")
+            elif res_text in self.valid_resolution_strings and color in self.valid_values['color_mode']:
+                width = self.parse_resolution_string(res_text)[0]
+                color_mode = self.get_color_mode_code(color)
+                try:
+                    ESP32UDPHeader.validate_stream_config(width, color_mode, lines)
+                except ValueError as exc:
+                    errors.append(str(exc))
         except ValueError:
             errors.append("每包行数必须是整数")
 
@@ -1091,37 +1098,37 @@ class YAMLConfigEditor:
             # 获取颜色模式代码
             color_mode_code = self.get_color_mode_code(color_mode_str)
 
-            # 检查lines_per_packet是否超出范围
-            if lines_per_packet > 8:
-                self.log_message(f"警告: 每包行数{lines_per_packet}超出Header限制(8)，将使用8")
-                lines_per_packet = 8
+            # MTU and the ESP32 post-scale line buffer both constrain packet height.
+            ESP32UDPHeader.validate_stream_config(width, color_mode_code, lines_per_packet)
 
             self.log_message(f"开始推流: 分辨率={width}x{height}, 颜色模式={color_mode_str}")
             self.log_message(
                 f"Header参数: 分辨率代码={resolution_code}, 颜色代码={color_mode_code}, 每包行数={lines_per_packet}")
 
-            frame_id = 0  # 这个暂时没什么用
-            last_frame = None
-            last_frame_time = time.time()
+            frame_id = 0
+            last_frame_time = time.perf_counter()
+            stats_started = time.perf_counter()
+            stats_frames = 0
+            stats_packets = 0
+            stats_bytes = 0
             while self.streaming:
-                frame_id = (frame_id + 1) & 0xFFFF
                 try:
                     # 捕获屏幕
                     # sc = cap.capture_window_by_title("原神", mss_mode=False)
                     sc = streamer.get_frame()  # 调用这个接口,不关心流来自于哪里，只需要返回一张任意大小的图片
-                    # 如果是空白图片，5秒内返回上一张图片
+                    # Do not retransmit the same source frame under a new frame_id.
                     if sc is None:
-                        if time.time() - last_frame_time> 5:
+                        if time.perf_counter() - last_frame_time > 5:
                             time.sleep(0.1)  # 超过5秒没数据，休息
-                            continue
-                        if last_frame is None: continue
-                        else: sc = last_frame
-                    else:
-                        last_frame_time = time.time()
-                        last_frame = sc
+                        else:
+                            time.sleep(0.001)
+                        continue
+
+                    last_frame_time = time.perf_counter()
 
                     # 调整大小
-                    sc = cv2.resize(sc, (width, height))
+                    if sc.shape[0] != height or sc.shape[1] != width:
+                        sc = cv2.resize(sc, (width, height))
 
                     # 转换颜色模式
                     if color_mode_code == ESP32UDPHeader.COLOR_RGB332:  # 1
@@ -1131,18 +1138,22 @@ class YAMLConfigEditor:
                         # RGB565转换
                         rgb = cv2.cvtColor(sc, cv2.COLOR_BGR2BGR565)
 
+                    frame_id = (frame_id + 1) & 0xFFFF
+                    frame_blob = np.ascontiguousarray(rgb).tobytes()
+                    row_bytes = width * (2 if color_mode_code == ESP32UDPHeader.COLOR_RGB565 else 1)
+                    next_packet_at = time.perf_counter()
+
                     # 发送数据
                     for y in range(0, height, lines_per_packet):
-                        start_time = time.time()
+                        remaining = next_packet_at - time.perf_counter()
+                        if remaining > 0:
+                            time.sleep(remaining)
+
                         lines = min(lines_per_packet, height - y)
 
-                        # 准备payload
-                        if color_mode_code == ESP32UDPHeader.COLOR_RGB332:
-                            # RGB332每个像素1字节
-                            payload = rgb[y:y + lines, :].astype(np.uint8).flatten().tobytes()
-                        else:
-                            # RGB565每个像素2字节
-                            payload = rgb[y:y + lines, :].flatten().tobytes()
+                        # The converted frame is contiguous, so packetization only slices bytes.
+                        offset = y * row_bytes
+                        payload = frame_blob[offset:offset + lines * row_bytes]
 
                         # 创建Header
                         header = ESP32UDPHeader.make_header(
@@ -1154,14 +1165,27 @@ class YAMLConfigEditor:
                         )
 
                         # 发送数据包
-                        sock.sendto(header + payload, (server_ip, server_port))
-
-                        # 控制发送频率
-                        time.sleep(udp_interval)
+                        datagram = header + payload
+                        sock.sendto(datagram, (server_ip, server_port))
+                        stats_packets += 1
+                        stats_bytes += len(datagram)
+                        next_packet_at += udp_interval
 
                         # 检查是否应该停止
                         if not self.streaming:
                             break
+
+                    stats_frames += 1
+                    now = time.perf_counter()
+                    elapsed = now - stats_started
+                    if elapsed >= 2.0:
+                        self.log_message(
+                            f"发送统计: {stats_frames / elapsed:.1f} FPS, "
+                            f"{stats_packets / elapsed:.0f} 包/秒, "
+                            f"{stats_bytes * 8 / elapsed / 1_000_000:.2f} Mbit/s"
+                        )
+                        stats_started = now
+                        stats_frames = stats_packets = stats_bytes = 0
 
                 except Exception as e:
                     self.log_message(f"推流错误: {str(e)}")

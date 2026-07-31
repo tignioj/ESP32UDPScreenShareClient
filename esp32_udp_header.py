@@ -2,6 +2,10 @@ import struct
 
 class ESP32UDPHeader(object):
 
+    HEADER_SIZE = 5
+    MAX_UDP_DATAGRAM = 1460
+    DISPLAY_LINE_BATCH = 8
+
     # 自定义包头信息
     # 一个字节占8位, 前两位表示分辨率，2-4位表示色彩模式，剩下4位表示行数，表示本张图片一次画几行
     # 这里必须定死，和ESP32一致
@@ -13,6 +17,32 @@ class ESP32UDPHeader(object):
     # 包头的色彩模式。
     COLOR_RGB565 = 0
     COLOR_RGB332 = 1
+
+    @classmethod
+    def max_lines_per_packet(cls, width, color_mode):
+        """Return the largest packet height supported by MTU and the receiver buffer."""
+        if width not in (240, 180, 120):
+            raise ValueError(f"不支持的分辨率: {width}")
+        if color_mode not in (cls.COLOR_RGB565, cls.COLOR_RGB332):
+            raise ValueError(f"不支持的颜色模式: {color_mode}")
+
+        bytes_per_pixel = 2 if color_mode == cls.COLOR_RGB565 else 1
+        mtu_limit = (cls.MAX_UDP_DATAGRAM - cls.HEADER_SIZE) // (width * bytes_per_pixel)
+
+        # ESP32 stores at most 8 output lines after scaling.
+        render_limit = {240: 8, 180: 6, 120: 4}[width]
+        return min(15, mtu_limit, render_limit)
+
+    @classmethod
+    def validate_stream_config(cls, width, color_mode, lines_per_packet):
+        max_lines = cls.max_lines_per_packet(width, color_mode)
+        if not 1 <= lines_per_packet <= max_lines:
+            mode_name = "RGB565" if color_mode == cls.COLOR_RGB565 else "RGB332"
+            raise ValueError(
+                f"{width}x{width} {mode_name} 每包行数必须在 1-{max_lines} 之间，"
+                f"当前为 {lines_per_packet}"
+            )
+        return max_lines
 
     @staticmethod
     def make_flags(resolution, color_mode, line_count):
