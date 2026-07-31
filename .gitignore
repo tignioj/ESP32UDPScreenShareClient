@@ -3,3 +3,18 @@
 /.idea/
 /util/
 *.spec
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+
+# Test, type-checker, and linter caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/

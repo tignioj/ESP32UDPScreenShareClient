@@ -1,6 +1,0 @@
-pywin32
-opencv-python
-numpy
-mss
-pyyaml
-sounddevice
