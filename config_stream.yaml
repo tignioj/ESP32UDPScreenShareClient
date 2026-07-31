@@ -52,6 +52,7 @@ streamer:
               rings: 6
               spacing: 13
               pulse: 13
+              smoothing: 0.78
               speed: 0.65
               thickness: 2
           mirror_bars:
