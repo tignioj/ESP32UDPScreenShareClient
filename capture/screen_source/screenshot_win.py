@@ -90,7 +90,7 @@ class WindowsScreenCapture(ImageSourceInterface):
                     remove_title_bar=self._remove_title_bar,
                     use_mss=self._use_mss
                 )
-            elif self._region:
+            elif self._capture_mode == 'region' and self._region:
                 # 区域截图
                 x, y, width, height = self._region
                 img = self._capture_region(
@@ -156,7 +156,7 @@ class WindowsScreenCapture(ImageSourceInterface):
                     'remove_title_bar': self._remove_title_bar,
                     'use_mss': self._use_mss
                 }
-            elif self._region:
+            elif self._capture_mode == 'region' and self._region:
                 x, y, width, height = self._region
                 resolution = (width, height)
                 info = {
@@ -258,8 +258,20 @@ class WindowsScreenCapture(ImageSourceInterface):
     def set_config(self, config: Dict[str, Any]) -> bool:
         """设置配置参数"""
         try:
+            capture_mode = config.get('capture_mode', self._capture_mode)
+            if capture_mode not in ('display', 'window', 'region'):
+                raise ValueError("capture_mode must be display, window or region")
+
+            region = config.get('region', self._region)
+            if capture_mode == 'region':
+                if not isinstance(region, (list, tuple)) or len(region) != 4:
+                    raise ValueError("region must contain x, y, width and height")
+                region = [int(value) for value in region]
+                if region[2] <= 0 or region[3] <= 0:
+                    raise ValueError("region width and height must be positive")
+
             if 'capture_mode' in config:
-                self._capture_mode = config['capture_mode']
+                self._capture_mode = capture_mode
 
             if 'display_idx' in config:
                 self.display_idx = config['display_idx']
@@ -277,7 +289,7 @@ class WindowsScreenCapture(ImageSourceInterface):
                 self._remove_title_bar = config['remove_title_bar']
 
             if 'region' in config:
-                self._region = config['region']
+                self._region = region
 
             if 'fps' in config:
                 self.fps = config['fps']

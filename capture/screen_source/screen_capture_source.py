@@ -22,7 +22,10 @@ class ScreenCaptureSource(ImageSourceInterface):
         # 根据平台选择实现
         if system == "Windows":
             from capture.screen_source.screenshot_win import WindowsScreenCapture
-            self._impl = WindowsScreenCapture(self.display_idx)
+            self._impl = WindowsScreenCapture(
+                source_id=self.source_id,
+                display_idx=self.display_idx,
+            )
         elif system == "Darwin":
             from capture.screen_source.screenshot_mac import MacScreenCapture
             self._impl = MacScreenCapture(self.display_idx)
@@ -49,11 +52,10 @@ class ScreenCaptureSource(ImageSourceInterface):
         if not self._impl:
             return {}
 
-        info = self._impl.get_display_info()
+        info = self._impl.get_info()
         info.update({
             'source_type': self.source_type.value,
             'source_id': self.source_id,
-            'fps': self._fps,
         })
         return info
 
@@ -81,11 +83,9 @@ class ScreenCaptureSource(ImageSourceInterface):
         return configs
 
     def set_config(self, config: Dict[str, Any]) -> bool:
-        pass
-        # if 'region' in config:
-        #     self._region = config['region']
-        #     return True
-        # return False
+        if not self._impl:
+            return False
+        return self._impl.set_config(config)
 
     def release(self):
         if self._impl:

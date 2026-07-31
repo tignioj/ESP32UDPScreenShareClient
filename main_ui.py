@@ -74,7 +74,7 @@ class YAMLConfigEditor:
 
         # 创建默认配置
         self.default_config = {
-            'server_ip': "192.168.30.161",
+            'server_ip': "192.168.100.161",
             'server_port': 8888,
             'resolution': [240, 240],
             'color_mode': "rgb332",
@@ -145,6 +145,13 @@ class YAMLConfigEditor:
         self.source_var = tk.StringVar(value="")
         self.source_id_by_label = {}
         self.source_type_by_id = {}
+
+        # 屏幕截图源运行时控制。
+        self.screen_mode_var = tk.StringVar(value="")
+        self.screen_region_vars = {
+            name: tk.StringVar(value=value)
+            for name, value in zip(('x', 'y', 'width', 'height'), ('0', '0', '240', '240'))
+        }
 
         # 音频可视化运行时控制。切换效果和滑块不会重启推流。
         self.audio_preset_var = tk.StringVar(value="自定义")
@@ -279,6 +286,50 @@ class YAMLConfigEditor:
         )
         self.switch_source_button.grid(row=0, column=2, padx=(5, 0))
 
+        # 仅在选中 screen 源时显示，修改后直接作用于运行中的截图源。
+        self.screen_controls_frame = ttk.LabelFrame(source_frame, text="截图区域（实时生效）", padding="6")
+        self.screen_controls_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(8, 0))
+        self.screen_controls_frame.columnconfigure(1, weight=1)
+
+        ttk.Label(self.screen_controls_frame, text="当前模式:").grid(row=0, column=0, sticky=tk.W)
+        ttk.Label(self.screen_controls_frame, textvariable=self.screen_mode_var, width=12).grid(
+            row=0, column=1, sticky=tk.W, padx=(5, 15)
+        )
+
+        screen_button_frame = ttk.Frame(self.screen_controls_frame)
+        screen_button_frame.grid(row=0, column=2, sticky=tk.E)
+        ttk.Button(
+            screen_button_frame,
+            text="应用区域",
+            command=self.apply_screen_region,
+        ).pack(side=tk.LEFT, padx=(0, 3))
+        ttk.Button(
+            screen_button_frame,
+            text="鼠标框选",
+            command=self.select_screen_region,
+        ).pack(side=tk.LEFT, padx=3)
+        ttk.Button(
+            screen_button_frame,
+            text="恢复全屏",
+            command=self.use_full_screen,
+        ).pack(side=tk.LEFT, padx=(3, 0))
+
+        region_input_frame = ttk.Frame(self.screen_controls_frame)
+        region_input_frame.grid(row=1, column=0, columnspan=3, sticky=tk.W, pady=(7, 0))
+        ttk.Label(region_input_frame, text="坐标与尺寸:").grid(row=0, column=0, sticky=tk.W, padx=(0, 8))
+        region_labels = (('x', 'X'), ('y', 'Y'), ('width', '宽'), ('height', '高'))
+        for index, (name, label) in enumerate(region_labels):
+            column = 1 + index * 2
+            ttk.Label(region_input_frame, text=f"{label}:").grid(row=0, column=column, sticky=tk.E)
+            entry = ttk.Entry(
+                region_input_frame,
+                textvariable=self.screen_region_vars[name],
+                width=7,
+            )
+            entry.grid(row=0, column=column + 1, sticky=tk.W, padx=(3, 10))
+            entry.bind('<Return>', lambda event: self.apply_screen_region())
+        self.screen_controls_frame.grid_remove()
+
         # 仅在选中 audio_visualization 源时显示。
         self.audio_controls_frame = ttk.LabelFrame(source_frame, text="音频视觉效果（实时生效）", padding="6")
         self.audio_controls_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(8, 0))
@@ -384,6 +435,7 @@ class YAMLConfigEditor:
         if not UDP_MODULES_AVAILABLE or streamer is None:
             self.source_combo.configure(values=(), state=tk.DISABLED)
             self.switch_source_button.configure(state=tk.DISABLED)
+            self.screen_controls_frame.grid_remove()
             self.audio_controls_frame.grid_remove()
             return
 
@@ -405,16 +457,19 @@ class YAMLConfigEditor:
                 self.source_combo.configure(state="readonly")
                 self.switch_source_button.configure(state=tk.NORMAL)
                 self.source_var.set(active_label or labels[0])
+                self.refresh_screen_controls()
                 self.refresh_audio_controls()
             else:
                 self.source_combo.configure(state=tk.DISABLED)
                 self.switch_source_button.configure(state=tk.DISABLED)
                 self.source_var.set("")
+                self.screen_controls_frame.grid_remove()
                 self.audio_controls_frame.grid_remove()
                 self.log_message("没有成功加载的图像源，请检查 config_stream.yaml")
         except Exception as e:
             self.source_combo.configure(values=(), state=tk.DISABLED)
             self.switch_source_button.configure(state=tk.DISABLED)
+            self.screen_controls_frame.grid_remove()
             self.audio_controls_frame.grid_remove()
             self.log_message(f"读取图像源失败: {str(e)}")
 
@@ -434,6 +489,7 @@ class YAMLConfigEditor:
             if streamer.switch_source(source_id):
                 self.log_message(f"已切换图像源: {source_id}")
                 self.status_var.set(f"当前图像源: {source_id}")
+                self.refresh_screen_controls()
                 self.refresh_audio_controls()
             else:
                 messagebox.showerror("错误", f"图像源不存在或不可用: {source_id}")
@@ -444,6 +500,167 @@ class YAMLConfigEditor:
 
     def get_selected_source_id(self):
         return self.source_id_by_label.get(self.source_var.get())
+
+    def refresh_screen_controls(self):
+        """按当前屏幕源的真实运行时参数刷新区域控制面板。"""
+        source_id = self.get_selected_source_id()
+        if not source_id or self.source_type_by_id.get(source_id) != 'screen':
+            self.screen_controls_frame.grid_remove()
+            return
+
+        try:
+            info = streamer.get_source_info(source_id)
+            mode = info.get('capture_mode', 'display')
+            mode_labels = {'display': '全屏', 'window': '窗口', 'region': '区域'}
+            self.screen_mode_var.set(mode_labels.get(mode, mode))
+
+            region = info.get('region')
+            if not region:
+                resolution = info.get('resolution', (240, 240))
+                region = (0, 0, resolution[0], resolution[1])
+            for name, value in zip(('x', 'y', 'width', 'height'), region):
+                self.screen_region_vars[name].set(str(int(value)))
+            self.screen_controls_frame.grid()
+        except Exception as e:
+            self.screen_controls_frame.grid_remove()
+            self.log_message(f"读取截图参数失败: {str(e)}")
+
+    def get_screen_region_inputs(self):
+        try:
+            region = [
+                int(self.screen_region_vars[name].get())
+                for name in ('x', 'y', 'width', 'height')
+            ]
+        except ValueError as e:
+            raise ValueError("X、Y、宽和高都必须是整数") from e
+        if region[2] <= 0 or region[3] <= 0:
+            raise ValueError("宽和高必须大于 0")
+        return region
+
+    def apply_screen_region(self):
+        """把输入的矩形区域立即应用到选中的屏幕源。"""
+        source_id = self.get_selected_source_id()
+        if not source_id or self.source_type_by_id.get(source_id) != 'screen':
+            return
+        try:
+            region = self.get_screen_region_inputs()
+            if not streamer.set_source_config(
+                {'capture_mode': 'region', 'region': region},
+                source_id,
+            ):
+                raise ValueError("截图源拒绝了该区域")
+            self.screen_mode_var.set("区域")
+            self.status_var.set(f"截图区域: {region[0]}, {region[1]}, {region[2]} × {region[3]}")
+            self.log_message(f"已更新截图区域: {region}")
+        except Exception as e:
+            messagebox.showerror("截图区域无效", str(e))
+            self.refresh_screen_controls()
+
+    def use_full_screen(self):
+        """让选中的屏幕源恢复显示器全屏截图。"""
+        source_id = self.get_selected_source_id()
+        if not source_id or self.source_type_by_id.get(source_id) != 'screen':
+            return
+        try:
+            if not streamer.set_source_config({'capture_mode': 'display'}, source_id):
+                raise ValueError("截图源无法切换到全屏模式")
+            self.status_var.set("截图源已恢复全屏")
+            self.log_message("截图源已恢复全屏")
+            self.refresh_screen_controls()
+        except Exception as e:
+            messagebox.showerror("切换失败", str(e))
+
+    def get_virtual_screen_bounds(self):
+        """返回整个虚拟桌面的坐标，支持副屏位于主屏左侧或上方。"""
+        if sys.platform == 'win32':
+            import ctypes
+            user32 = ctypes.windll.user32
+            return (
+                user32.GetSystemMetrics(76),
+                user32.GetSystemMetrics(77),
+                user32.GetSystemMetrics(78),
+                user32.GetSystemMetrics(79),
+            )
+        return (
+            self.root.winfo_vrootx(),
+            self.root.winfo_vrooty(),
+            self.root.winfo_vrootwidth(),
+            self.root.winfo_vrootheight(),
+        )
+
+    def select_screen_region(self):
+        """显示半透明虚拟桌面遮罩，让用户拖动选择截图区域。"""
+        virtual_x, virtual_y, virtual_width, virtual_height = self.get_virtual_screen_bounds()
+        selector = tk.Toplevel(self.root)
+        selector.overrideredirect(True)
+        selector.geometry(
+            f"{virtual_width}x{virtual_height}{virtual_x:+d}{virtual_y:+d}"
+        )
+        selector.attributes('-topmost', True)
+        selector.attributes('-alpha', 0.28)
+        selector.configure(bg='black', cursor='crosshair')
+
+        canvas = tk.Canvas(selector, bg='black', highlightthickness=0, cursor='crosshair')
+        canvas.pack(fill=tk.BOTH, expand=True)
+        canvas.create_text(
+            virtual_width // 2,
+            32,
+            text="拖动鼠标选择截图区域 · ESC / 右键取消",
+            fill='white',
+            font=('Microsoft YaHei UI', 14, 'bold'),
+        )
+        drag = {'start': None, 'rectangle': None}
+
+        def cancel(event=None):
+            selector.destroy()
+            self.status_var.set("已取消区域选择")
+
+        def on_press(event):
+            drag['start'] = (event.x, event.y)
+            if drag['rectangle'] is not None:
+                canvas.delete(drag['rectangle'])
+            drag['rectangle'] = canvas.create_rectangle(
+                event.x,
+                event.y,
+                event.x,
+                event.y,
+                outline='#ff3b30',
+                width=4,
+            )
+
+        def on_drag(event):
+            if drag['start'] is not None:
+                canvas.coords(
+                    drag['rectangle'],
+                    drag['start'][0],
+                    drag['start'][1],
+                    event.x,
+                    event.y,
+                )
+
+        def on_release(event):
+            if drag['start'] is None:
+                return
+            start_x, start_y = drag['start']
+            left = min(start_x, event.x)
+            top = min(start_y, event.y)
+            width = abs(event.x - start_x)
+            height = abs(event.y - start_y)
+            if width < 2 or height < 2:
+                return
+            region = (virtual_x + left, virtual_y + top, width, height)
+            for name, value in zip(('x', 'y', 'width', 'height'), region):
+                self.screen_region_vars[name].set(str(value))
+            selector.destroy()
+            self.apply_screen_region()
+
+        canvas.bind('<ButtonPress-1>', on_press)
+        canvas.bind('<B1-Motion>', on_drag)
+        canvas.bind('<ButtonRelease-1>', on_release)
+        canvas.bind('<Button-3>', cancel)
+        selector.bind('<Escape>', cancel)
+        selector.focus_force()
+        self.status_var.set("请拖动鼠标选择截图区域")
 
     def refresh_audio_controls(self):
         """按当前音频源的真实运行时配置刷新控制面板。"""
