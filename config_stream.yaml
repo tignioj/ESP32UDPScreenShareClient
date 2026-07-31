@@ -12,6 +12,12 @@ streamer:
         draw_spectrum_circular2: True  # 圆环特效2：红蓝白电离
         draw_spectrum_circular3: False # 圆环特效3：白色动态圆环+内外双律动扩散
         draw_particles: True # 特效：底部发射粒子
+        gain: 1.0 # 灵敏度（0.1-4.0）
+        spectrum_smoothing: 0.5 # 频谱平滑（0.0-0.95）
+        radius_smoothing: 0.9 # 律动平滑（0.0-0.98）
+        base_radius: 60 # 圆环基础半径（20-100）
+        radius_expansion: 30 # 圆环律动幅度（5-100）
+        max_particles: 200 # 最大粒子数（0-500）
 
 
 

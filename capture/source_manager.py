@@ -149,6 +149,18 @@ class SourceManager:
 
             return source.capture()
 
+    def get_source_info(self, source_id: str = None) -> Dict[str, Any]:
+        """在线程安全的前提下读取图像源配置。"""
+        with self._source_lock:
+            source = self.get_source(source_id)
+            return source.get_info() if source else {}
+
+    def set_source_config(self, config: Dict[str, Any], source_id: str = None) -> bool:
+        """在取帧锁内更新图像源运行时配置。"""
+        with self._source_lock:
+            source = self.get_source(source_id)
+            return source.set_config(config) if source else False
+
     def cleanup(self):
         """清理所有资源"""
         with self._source_lock:

@@ -70,17 +70,11 @@ class Streamer:
 
     def get_source_info(self, source_id: str = None) -> Dict[str, Any]:
         """获取当前源信息"""
-        source = self.source_manager.get_source(source_id)
-        if source:
-            return source.get_info()
-        return {}
+        return self.source_manager.get_source_info(source_id)
 
     def set_source_config(self, config: Dict[str, Any], source_id: str = None) -> bool:
         """设置图像源配置"""
-        source = self.source_manager.get_source(source_id)
-        if source:
-            return source.set_config(config)
-        return False
+        return self.source_manager.set_source_config(config, source_id)
 
     def close(self):
         """关闭推流程序"""

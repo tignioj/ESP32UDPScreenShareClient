@@ -28,6 +28,32 @@ except ImportError as e:
 
 
 class YAMLConfigEditor:
+    AUDIO_EFFECTS = {
+        'draw_waveform': '波形',
+        'draw_spectrum_bar': '频谱柱',
+        'draw_spectrum_circular1': '三重圆环',
+        'draw_spectrum_circular2': '红蓝电离',
+        'draw_spectrum_circular3': '双向律动',
+        'draw_particles': '粒子',
+    }
+    AUDIO_PRESETS = {
+        '纯波形': {'draw_waveform'},
+        '频谱柱': {'draw_spectrum_bar'},
+        '三重圆环': {'draw_spectrum_circular1'},
+        '红蓝电离': {'draw_spectrum_circular2'},
+        '双向律动': {'draw_spectrum_circular3'},
+        '粒子频谱': {'draw_spectrum_bar', 'draw_particles'},
+        '全效果': set(AUDIO_EFFECTS),
+    }
+    AUDIO_PARAMETERS = {
+        'gain': ('灵敏度', 0.1, 4.0, 0.1, 1),
+        'spectrum_smoothing': ('频谱平滑', 0.0, 0.95, 0.05, 2),
+        'radius_smoothing': ('律动平滑', 0.0, 0.98, 0.02, 2),
+        'base_radius': ('基础半径', 20, 100, 1, 0),
+        'radius_expansion': ('律动幅度', 5, 100, 1, 0),
+        'max_particles': ('粒子数量', 0, 500, 10, 0),
+    }
+
     def __init__(self, root):
         print("==================================================================================================================")
         print("欢迎使用ESP32Holocubic ScreenShareUDP推流工具，本项目开源免费，地址是:https://github.com/tignioj/ESP32UDPScreenShareClient")
@@ -35,7 +61,8 @@ class YAMLConfigEditor:
         print("==================================================================================================================")
         self.root = root
         self.root.title("YAML 配置文件编辑器V0.0.5")
-        self.root.geometry("700x710")
+        self.root.geometry("760x850")
+        self.root.minsize(720, 760)
 
         # UDP推流相关
         self.streaming = False
@@ -117,6 +144,21 @@ class YAMLConfigEditor:
         # 图像源选择
         self.source_var = tk.StringVar(value="")
         self.source_id_by_label = {}
+        self.source_type_by_id = {}
+
+        # 音频可视化运行时控制。切换效果和滑块不会重启推流。
+        self.audio_preset_var = tk.StringVar(value="自定义")
+        self.audio_effect_vars = {
+            name: tk.BooleanVar(value=False) for name in self.AUDIO_EFFECTS
+        }
+        self.audio_parameter_vars = {
+            name: tk.DoubleVar(value=minimum)
+            for name, (_, minimum, _, _, _) in self.AUDIO_PARAMETERS.items()
+        }
+        self.audio_parameter_value_vars = {
+            name: tk.StringVar(value="") for name in self.AUDIO_PARAMETERS
+        }
+        self.updating_audio_controls = False
 
         # 日志文本框
         self.log_text = None
@@ -237,6 +279,57 @@ class YAMLConfigEditor:
         )
         self.switch_source_button.grid(row=0, column=2, padx=(5, 0))
 
+        # 仅在选中 audio_visualization 源时显示。
+        self.audio_controls_frame = ttk.LabelFrame(source_frame, text="音频视觉效果（实时生效）", padding="6")
+        self.audio_controls_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(8, 0))
+        self.audio_controls_frame.columnconfigure(1, weight=1)
+        self.audio_controls_frame.columnconfigure(4, weight=1)
+
+        ttk.Label(self.audio_controls_frame, text="效果组合:").grid(row=0, column=0, sticky=tk.W)
+        self.audio_preset_combo = ttk.Combobox(
+            self.audio_controls_frame,
+            textvariable=self.audio_preset_var,
+            values=['自定义', *self.AUDIO_PRESETS],
+            state="readonly",
+            width=16,
+        )
+        self.audio_preset_combo.grid(row=0, column=1, sticky=tk.W, padx=(5, 12))
+        self.audio_preset_combo.bind("<<ComboboxSelected>>", self.on_audio_preset_selected)
+        ttk.Label(self.audio_controls_frame, text="也可自由叠加:").grid(row=0, column=2, sticky=tk.W)
+
+        effects_frame = ttk.Frame(self.audio_controls_frame)
+        effects_frame.grid(row=0, column=3, columnspan=3, sticky=tk.W)
+        for index, (name, label) in enumerate(self.AUDIO_EFFECTS.items()):
+            ttk.Checkbutton(
+                effects_frame,
+                text=label,
+                variable=self.audio_effect_vars[name],
+                command=lambda effect=name: self.on_audio_effect_changed(effect),
+            ).grid(row=index // 3, column=index % 3, sticky=tk.W, padx=(0, 8))
+
+        for index, (name, (label, minimum, maximum, step, digits)) in enumerate(self.AUDIO_PARAMETERS.items()):
+            row_index = 1 + index // 2
+            column_index = (index % 2) * 3
+            ttk.Label(self.audio_controls_frame, text=f"{label}:").grid(
+                row=row_index, column=column_index, sticky=tk.W, pady=(5, 0)
+            )
+            scale = ttk.Scale(
+                self.audio_controls_frame,
+                from_=minimum,
+                to=maximum,
+                variable=self.audio_parameter_vars[name],
+                command=lambda value, parameter=name: self.on_audio_parameter_changed(parameter, value),
+            )
+            scale.grid(row=row_index, column=column_index + 1, sticky=(tk.W, tk.E), padx=5, pady=(5, 0))
+            ttk.Label(
+                self.audio_controls_frame,
+                textvariable=self.audio_parameter_value_vars[name],
+                width=5,
+                anchor=tk.E,
+            ).grid(row=row_index, column=column_index + 2, sticky=tk.E, pady=(5, 0))
+
+        self.audio_controls_frame.grid_remove()
+
         # 按钮框架
         button_frame = ttk.Frame(main_frame)
         button_frame.grid(row=4, column=0, columnspan=2, pady=10)
@@ -286,10 +379,12 @@ class YAMLConfigEditor:
     def refresh_source_list(self):
         """把 config_stream.yaml 中成功加载的源显示到下拉框。"""
         self.source_id_by_label.clear()
+        self.source_type_by_id.clear()
 
         if not UDP_MODULES_AVAILABLE or streamer is None:
             self.source_combo.configure(values=(), state=tk.DISABLED)
             self.switch_source_button.configure(state=tk.DISABLED)
+            self.audio_controls_frame.grid_remove()
             return
 
         try:
@@ -301,6 +396,7 @@ class YAMLConfigEditor:
                 label = f"{source['id']} ({source['type']})"
                 labels.append(label)
                 self.source_id_by_label[label] = source['id']
+                self.source_type_by_id[source['id']] = source['type']
                 if source.get('active'):
                     active_label = label
 
@@ -309,14 +405,17 @@ class YAMLConfigEditor:
                 self.source_combo.configure(state="readonly")
                 self.switch_source_button.configure(state=tk.NORMAL)
                 self.source_var.set(active_label or labels[0])
+                self.refresh_audio_controls()
             else:
                 self.source_combo.configure(state=tk.DISABLED)
                 self.switch_source_button.configure(state=tk.DISABLED)
                 self.source_var.set("")
+                self.audio_controls_frame.grid_remove()
                 self.log_message("没有成功加载的图像源，请检查 config_stream.yaml")
         except Exception as e:
             self.source_combo.configure(values=(), state=tk.DISABLED)
             self.switch_source_button.configure(state=tk.DISABLED)
+            self.audio_controls_frame.grid_remove()
             self.log_message(f"读取图像源失败: {str(e)}")
 
     def on_source_selected(self, event=None):
@@ -335,12 +434,98 @@ class YAMLConfigEditor:
             if streamer.switch_source(source_id):
                 self.log_message(f"已切换图像源: {source_id}")
                 self.status_var.set(f"当前图像源: {source_id}")
+                self.refresh_audio_controls()
             else:
                 messagebox.showerror("错误", f"图像源不存在或不可用: {source_id}")
                 self.refresh_source_list()
         except Exception as e:
             messagebox.showerror("错误", f"切换图像源失败: {str(e)}")
             self.log_message(f"切换图像源失败: {str(e)}")
+
+    def get_selected_source_id(self):
+        return self.source_id_by_label.get(self.source_var.get())
+
+    def refresh_audio_controls(self):
+        """按当前音频源的真实运行时配置刷新控制面板。"""
+        source_id = self.get_selected_source_id()
+        if not source_id or self.source_type_by_id.get(source_id) != 'audio_visualization':
+            self.audio_controls_frame.grid_remove()
+            return
+
+        try:
+            info = streamer.get_source_info(source_id)
+            config = info.get('config', {})
+            self.updating_audio_controls = True
+            for name, variable in self.audio_effect_vars.items():
+                variable.set(bool(config.get(name, False)))
+            for name, variable in self.audio_parameter_vars.items():
+                if name in config:
+                    variable.set(float(config[name]))
+                self.update_audio_parameter_label(name, variable.get())
+            self.audio_preset_var.set(self.find_matching_audio_preset())
+            self.audio_controls_frame.grid()
+        except Exception as e:
+            self.audio_controls_frame.grid_remove()
+            self.log_message(f"读取音频视觉参数失败: {str(e)}")
+        finally:
+            self.updating_audio_controls = False
+
+    def find_matching_audio_preset(self):
+        enabled = {
+            name for name, variable in self.audio_effect_vars.items() if variable.get()
+        }
+        for preset_name, preset_effects in self.AUDIO_PRESETS.items():
+            if enabled == preset_effects:
+                return preset_name
+        return '自定义'
+
+    def apply_audio_runtime_config(self, config):
+        if self.updating_audio_controls:
+            return
+        source_id = self.get_selected_source_id()
+        if not source_id or self.source_type_by_id.get(source_id) != 'audio_visualization':
+            return
+        try:
+            if not streamer.set_source_config(config, source_id):
+                raise ValueError("参数超出允许范围")
+            self.status_var.set("音频视觉参数已实时更新")
+        except Exception as e:
+            self.log_message(f"更新音频视觉参数失败: {str(e)}")
+            self.refresh_audio_controls()
+
+    def on_audio_preset_selected(self, event=None):
+        preset_name = self.audio_preset_var.get()
+        if preset_name not in self.AUDIO_PRESETS:
+            return
+        enabled = self.AUDIO_PRESETS[preset_name]
+        config = {}
+        self.updating_audio_controls = True
+        try:
+            for name, variable in self.audio_effect_vars.items():
+                value = name in enabled
+                variable.set(value)
+                config[name] = value
+        finally:
+            self.updating_audio_controls = False
+        self.apply_audio_runtime_config(config)
+        self.log_message(f"已切换音频视觉效果: {preset_name}")
+
+    def on_audio_effect_changed(self, effect):
+        self.audio_preset_var.set(self.find_matching_audio_preset())
+        self.apply_audio_runtime_config({effect: self.audio_effect_vars[effect].get()})
+
+    def update_audio_parameter_label(self, parameter, value):
+        digits = self.AUDIO_PARAMETERS[parameter][4]
+        self.audio_parameter_value_vars[parameter].set(f"{float(value):.{digits}f}")
+
+    def on_audio_parameter_changed(self, parameter, value):
+        _, minimum, maximum, step, digits = self.AUDIO_PARAMETERS[parameter]
+        numeric_value = max(minimum, min(maximum, float(value)))
+        numeric_value = round(numeric_value / step) * step
+        if digits == 0:
+            numeric_value = int(round(numeric_value))
+        self.update_audio_parameter_label(parameter, numeric_value)
+        self.apply_audio_runtime_config({parameter: numeric_value})
 
     def log_message(self, message):
         """添加消息到日志框"""

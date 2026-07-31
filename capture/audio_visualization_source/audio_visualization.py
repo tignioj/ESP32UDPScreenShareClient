@@ -32,6 +32,7 @@ class AudioVisualizer:
         self.HEIGHT = height
         self.CHANNELS = channels
         self.NOISE_FLOOR = 1e-8  # 可调，VB-Cable 通常在 1e-4 ~ 1e-3
+        self.gain = 1.0
 
         # 音频数据缓冲区
         self.window = np.hanning(self.BLOCK_SIZE)
@@ -82,7 +83,7 @@ class AudioVisualizer:
             print(f"音频流状态: {status}")
 
         # 取左声道数据
-        mono = indata[:, 0].copy()
+        mono = indata[:, 0].copy() * self.gain
         energy = np.mean(mono ** 2)
         if energy < self.NOISE_FLOOR:
             self.spectrum[:] = 0
@@ -507,8 +508,10 @@ class AudioVisualizer:
     def release(self) -> None:
         """释放资源"""
         if self.stream is not None:
-            self.stream.stop()
-            self.stream.close()
+            stream = self.stream
+            self.stream = None
+            stream.stop()
+            stream.close()
 
     def __del__(self):
         """析构函数确保资源释放"""
