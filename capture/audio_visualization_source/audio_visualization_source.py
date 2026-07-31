@@ -1,142 +1,154 @@
-import math
+from __future__ import annotations
+
 import threading
+from typing import Any, Dict, List, Optional
+
 import numpy as np
-from typing import Optional, List, Dict, Any
-from capture.interface import SourceType, ImageSourceInterface
+
+from capture.interface import ImageSourceInterface, SourceType
 from capture.audio_visualization_source.audio_visualization import AudioVisualizer
 
 
 class AudioVisualizationSource(ImageSourceInterface):
-    EFFECT_DEFAULTS = {
-        'draw_waveform': True,
-        'draw_spectrum_bar': True,
-        'draw_spectrum_circular1': False,
-        'draw_spectrum_circular2': True,
-        'draw_spectrum_circular3': False,
-        'draw_neon_mirror': False,
-        'draw_aurora': False,
-        'draw_starburst': False,
-        'draw_waterfall': False,
-        'draw_particles': True,
+    """Runtime source exposing the visualizer's namespaced configuration."""
+
+    LEGACY_EFFECTS = {
+        "draw_waveform": "waveform",
+        "draw_spectrum_bar": "spectrum_bars",
+        "draw_spectrum_circular1": "orbital_rings",
+        "draw_spectrum_circular2": "chroma_ring",
+        "draw_spectrum_circular3": "pulse_tunnel",
+        "draw_neon_mirror": "mirror_bars",
+        "draw_aurora": "aurora",
+        "draw_starburst": "starburst",
+        "draw_waterfall": "waterfall",
+        "draw_particles": "particles",
     }
-    PARAMETER_DEFAULTS = {
-        'gain': 1.0,
-        'spectrum_smoothing': 0.5,
-        'radius_smoothing': 0.9,
-        'base_radius': 60,
-        'radius_expansion': 30,
-        'max_particles': 200,
-    }
-    PARAMETER_RANGES = {
-        'gain': (0.1, 4.0),
-        'spectrum_smoothing': (0.0, 0.95),
-        'radius_smoothing': (0.0, 0.98),
-        'base_radius': (20, 100),
-        'radius_expansion': (5, 100),
-        'max_particles': (0, 500),
+    LEGACY_INPUTS = {"gain": "gain"}
+    VISUALIZER_OPTIONS = {
+        "width", "height", "sample_rate", "block_size", "channels", "target_device"
     }
 
     def __init__(self, source_type: SourceType, source_id: str = ""):
         super().__init__(source_type, source_id)
-        self.audio_spectrum = AudioVisualizer(block_size=512,width=240,height=240)
+        self.visualizer: Optional[AudioVisualizer] = None
         self._config_lock = threading.RLock()
-        for name, value in self.EFFECT_DEFAULTS.items():
-            setattr(self, name, value)
 
     def initialize(self, **kwargs) -> bool:
-        initial_config = dict(self.EFFECT_DEFAULTS)
-        initial_config.update(self.PARAMETER_DEFAULTS)
-        initial_config.update(kwargs)
-        return self.set_config(initial_config)
+        options = {
+            "width": 240,
+            "height": 240,
+            "sample_rate": 48000,
+            "block_size": 1024,
+            "channels": 2,
+            "target_device": "CABLE Output",
+        }
+        options.update({key: kwargs[key] for key in self.VISUALIZER_OPTIONS if key in kwargs})
+        try:
+            self.visualizer = AudioVisualizer(**options)
+            config = self._translate_config(kwargs)
+            if config:
+                self.visualizer.configure(config)
+            return True
+        except Exception as exc:
+            if self.visualizer is not None:
+                self.visualizer.release()
+                self.visualizer = None
+            print(f"音频可视化初始化失败: {exc}")
+            return False
 
     def capture(self) -> Optional[np.ndarray]:
         with self._config_lock:
-            effects = {name: getattr(self, name) for name in self.EFFECT_DEFAULTS}
-        return self.audio_spectrum.get_frame(**effects)
+            return self.visualizer.get_frame() if self.visualizer is not None else None
 
     def get_info(self) -> Dict[str, Any]:
         with self._config_lock:
-            config = {name: getattr(self, name) for name in self.EFFECT_DEFAULTS}
-            config.update({
-                'gain': self.audio_spectrum.gain,
-                'spectrum_smoothing': self.audio_spectrum.smoothing_factor,
-                'radius_smoothing': self.audio_spectrum.radius_smoothing,
-                'base_radius': self.audio_spectrum.base_radius,
-                'radius_expansion': self.audio_spectrum.max_radius_expansion,
-                'max_particles': self.audio_spectrum.max_particles,
-            })
+            config = self.visualizer.get_config() if self.visualizer is not None else {}
         return {
-            'source_id': self.source_id,
-            'source_type': self.source_type.value,
-            'running': self._is_running,
-            'config': config,
+            "source_id": self.source_id,
+            "source_type": self.source_type.value,
+            "running": self._is_running,
+            "config": config,
+            "audio_ui": {
+                "input_parameters": AudioVisualizer.input_catalog(),
+                "effects": AudioVisualizer.effect_catalog(),
+            },
         }
 
     def get_available_configs(self) -> List[Dict[str, Any]]:
-        configs = [
-            {'name': name, 'type': 'boolean', 'default': default}
-            for name, default in self.EFFECT_DEFAULTS.items()
+        return [
+            {"name": "input", "type": "group", "parameters": AudioVisualizer.input_catalog()},
+            {"name": "effects", "type": "effects", "items": AudioVisualizer.effect_catalog()},
         ]
-        configs.extend(
-            {
-                'name': name,
-                'type': 'integer' if name in {'base_radius', 'radius_expansion', 'max_particles'} else 'float',
-                'min': self.PARAMETER_RANGES[name][0],
-                'max': self.PARAMETER_RANGES[name][1],
-                'default': default,
+
+    def _translate_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Accept the new schema and migrate pre-refactor flat keys in memory."""
+        translated: Dict[str, Any] = {}
+        if isinstance(config.get("input"), dict):
+            translated["input"] = dict(config["input"])
+        if isinstance(config.get("effects"), dict):
+            translated["effects"] = {
+                effect_id: dict(effect_config)
+                for effect_id, effect_config in config["effects"].items()
+                if isinstance(effect_config, dict)
             }
-            for name, default in self.PARAMETER_DEFAULTS.items()
-        )
-        return configs
+
+        input_config = translated.setdefault("input", {})
+        effects_config = translated.setdefault("effects", {})
+        for old_key, new_key in self.LEGACY_INPUTS.items():
+            if old_key in config and new_key not in input_config:
+                input_config[new_key] = config[old_key]
+        for old_key, effect_id in self.LEGACY_EFFECTS.items():
+            if old_key in config:
+                effects_config.setdefault(effect_id, {}).setdefault("enabled", bool(config[old_key]))
+
+        smoothing = config.get("spectrum_smoothing")
+        if smoothing is not None:
+            for effect_id in (
+                "waveform", "spectrum_bars", "orbital_rings", "chroma_ring",
+                "mirror_bars", "aurora", "starburst", "waterfall",
+            ):
+                effects_config.setdefault(effect_id, {}).setdefault("params", {}).setdefault(
+                    "smoothing", smoothing
+                )
+        if "base_radius" in config:
+            for effect_id in ("orbital_rings", "chroma_ring"):
+                effects_config.setdefault(effect_id, {}).setdefault("params", {}).setdefault(
+                    "radius", config["base_radius"]
+                )
+        if "radius_expansion" in config:
+            effects_config.setdefault("orbital_rings", {}).setdefault("params", {}).setdefault(
+                "response", config["radius_expansion"]
+            )
+            effects_config.setdefault("chroma_ring", {}).setdefault("params", {}).setdefault(
+                "length", config["radius_expansion"]
+            )
+        if "max_particles" in config:
+            effects_config.setdefault("particles", {}).setdefault("params", {}).setdefault(
+                "count", config["max_particles"]
+            )
+
+        if not input_config:
+            translated.pop("input", None)
+        if not effects_config:
+            translated.pop("effects", None)
+        return translated
 
     def set_config(self, config: Dict[str, Any]) -> bool:
+        if self.visualizer is None or not isinstance(config, dict):
+            return False
         try:
-            updates = {}
-            for name in self.EFFECT_DEFAULTS:
-                if name in config:
-                    updates[name] = bool(config[name])
-
-            for name, (minimum, maximum) in self.PARAMETER_RANGES.items():
-                if name not in config:
-                    continue
-                value = float(config[name])
-                if not math.isfinite(value) or not minimum <= value <= maximum:
-                    return False
-                if name in {'base_radius', 'radius_expansion', 'max_particles'}:
-                    value = int(round(value))
-                updates[name] = value
+            translated = self._translate_config(config)
+            if not translated and config:
+                return False
+            with self._config_lock:
+                self.visualizer.configure(translated)
+            return True
         except (TypeError, ValueError):
             return False
 
+    def release(self) -> None:
         with self._config_lock:
-            for name in self.EFFECT_DEFAULTS:
-                if name in updates:
-                    setattr(self, name, updates[name])
-
-            visualizer_attrs = {
-                'gain': 'gain',
-                'spectrum_smoothing': 'smoothing_factor',
-                'radius_smoothing': 'radius_smoothing',
-                'base_radius': 'base_radius',
-                'radius_expansion': 'max_radius_expansion',
-                'max_particles': 'max_particles',
-            }
-            for name, attr_name in visualizer_attrs.items():
-                if name in updates:
-                    setattr(self.audio_spectrum, attr_name, updates[name])
-
-            minimum_radius = self.audio_spectrum.base_radius
-            maximum_radius = minimum_radius + self.audio_spectrum.max_radius_expansion
-            self.audio_spectrum.current_radius = max(
-                minimum_radius,
-                min(self.audio_spectrum.current_radius, maximum_radius)
-            )
-            if 'max_particles' in updates:
-                if updates['max_particles'] == 0:
-                    self.audio_spectrum.particles.clear()
-                else:
-                    self.audio_spectrum.particles = self.audio_spectrum.particles[-updates['max_particles']:]
-        return True
-
-    def release(self):
-        self.audio_spectrum.release()
+            if self.visualizer is not None:
+                self.visualizer.release()
+                self.visualizer = None

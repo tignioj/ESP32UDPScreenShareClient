@@ -28,63 +28,6 @@ except ImportError as e:
 
 
 class YAMLConfigEditor:
-    AUDIO_EFFECTS = {
-        'draw_waveform': '波形',
-        'draw_spectrum_bar': '频谱柱',
-        'draw_spectrum_circular1': '三重圆环',
-        'draw_spectrum_circular2': '红蓝电离',
-        'draw_spectrum_circular3': '双向律动',
-        'draw_neon_mirror': '霓虹镜像',
-        'draw_aurora': '极光山脉',
-        'draw_starburst': '放射星芒',
-        'draw_waterfall': '频谱瀑布',
-        'draw_particles': '粒子',
-    }
-    AUDIO_PRESETS = {
-        '纯波形': {'draw_waveform'},
-        '频谱柱': {'draw_spectrum_bar'},
-        '三重圆环': {'draw_spectrum_circular1'},
-        '红蓝电离': {'draw_spectrum_circular2'},
-        '双向律动': {'draw_spectrum_circular3'},
-        '霓虹镜像': {'draw_neon_mirror'},
-        '极光山脉': {'draw_aurora'},
-        '放射星芒': {'draw_starburst'},
-        '频谱瀑布': {'draw_waterfall'},
-        '赛博舞台': {'draw_waterfall', 'draw_starburst'},
-        '粒子频谱': {'draw_spectrum_bar', 'draw_particles'},
-        '全效果': set(AUDIO_EFFECTS),
-    }
-    AUDIO_PARAMETERS = {
-        'gain': ('音量灵敏度', 0.1, 4.0, 0.1, 1),
-        'spectrum_smoothing': ('变化平滑度', 0.0, 0.95, 0.05, 2),
-        'radius_smoothing': ('律动平滑度', 0.0, 0.98, 0.02, 2),
-        'base_radius': ('圆环基础大小', 20, 100, 1, 0),
-        'radius_expansion': ('随节奏扩张', 5, 100, 1, 0),
-        'max_particles': ('最大粒子数', 0, 500, 10, 0),
-    }
-    AUDIO_PARAMETER_GROUPS = (
-        (
-            '输入响应',
-            '作用于：全部已启用效果',
-            ('gain',),
-        ),
-        (
-            '频谱动态',
-            '作用于：频谱柱、霓虹镜像、极光山脉、放射星芒、频谱瀑布',
-            ('spectrum_smoothing',),
-        ),
-        (
-            '圆环与律动',
-            '作用于：三重圆环、红蓝电离、双向律动，以及粒子的律动强度',
-            ('radius_smoothing', 'base_radius', 'radius_expansion'),
-        ),
-        (
-            '粒子效果',
-            '作用于：粒子',
-            ('max_particles',),
-        ),
-    )
-
     def __init__(self, root):
         print("==================================================================================================================")
         print("欢迎使用ESP32Holocubic ScreenShareUDP推流工具，本项目开源免费，地址是:https://github.com/tignioj/ESP32UDPScreenShareClient")
@@ -189,18 +132,20 @@ class YAMLConfigEditor:
             for name, value in zip(('x', 'y', 'width', 'height'), ('0', '0', '240', '240'))
         }
 
-        # 音频可视化运行时控制。切换效果和滑块不会重启推流。
-        self.audio_preset_var = tk.StringVar(value="自定义")
-        self.audio_effect_vars = {
-            name: tk.BooleanVar(value=False) for name in self.AUDIO_EFFECTS
-        }
-        self.audio_parameter_vars = {
-            name: tk.DoubleVar(value=minimum)
-            for name, (_, minimum, _, _, _) in self.AUDIO_PARAMETERS.items()
-        }
-        self.audio_parameter_value_vars = {
-            name: tk.StringVar(value="") for name in self.AUDIO_PARAMETERS
-        }
+        # 音频效果和参数完全由各效果模块提供，UI 不再维护重复常量。
+        self.audio_effect_catalog = []
+        self.audio_effect_meta = {}
+        self.audio_effect_label_to_id = {}
+        self.audio_effect_config = {}
+        self.audio_input_catalog = []
+        self.audio_selected_effect_var = tk.StringVar(value="")
+        self.audio_selected_effect_enabled_var = tk.BooleanVar(value=False)
+        self.audio_effect_description_var = tk.StringVar(value="")
+        self.audio_enabled_summary_var = tk.StringVar(value="尚未加载效果")
+        self.audio_input_vars = {}
+        self.audio_input_value_vars = {}
+        self.audio_effect_parameter_vars = {}
+        self.audio_effect_parameter_value_vars = {}
         self.updating_audio_controls = False
 
         # 日志文本框
@@ -366,89 +311,69 @@ class YAMLConfigEditor:
             entry.bind('<Return>', lambda event: self.apply_screen_region())
         self.screen_controls_frame.grid_remove()
 
-        # 仅在选中 audio_visualization 源时显示。
-        self.audio_controls_frame = ttk.LabelFrame(source_frame, text="音频视觉效果（实时生效）", padding="8")
+        # 音频工作台由效果模块的元数据动态生成。
+        self.audio_controls_frame = ttk.LabelFrame(source_frame, text="音频可视化工作台（实时生效）", padding="8")
         self.audio_controls_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(8, 0))
-        self.audio_controls_frame.columnconfigure(1, weight=1)
+        self.audio_controls_frame.columnconfigure(0, weight=1)
 
-        ttk.Label(self.audio_controls_frame, text="效果预设:").grid(row=0, column=0, sticky=tk.W)
-        self.audio_preset_combo = ttk.Combobox(
-            self.audio_controls_frame,
-            textvariable=self.audio_preset_var,
-            values=['自定义', *self.AUDIO_PRESETS],
+        effect_toolbar = ttk.Frame(self.audio_controls_frame)
+        effect_toolbar.grid(row=0, column=0, sticky=(tk.W, tk.E))
+        effect_toolbar.columnconfigure(1, weight=1)
+        ttk.Label(effect_toolbar, text="编辑效果:").grid(row=0, column=0, sticky=tk.W)
+        self.audio_effect_combo = ttk.Combobox(
+            effect_toolbar,
+            textvariable=self.audio_selected_effect_var,
             state="readonly",
-            width=16,
+            width=20,
         )
-        self.audio_preset_combo.grid(row=0, column=1, sticky=tk.W, padx=(5, 12))
-        self.audio_preset_combo.bind("<<ComboboxSelected>>", self.on_audio_preset_selected)
+        self.audio_effect_combo.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(6, 10))
+        self.audio_effect_combo.bind("<<ComboboxSelected>>", self.on_audio_effect_selected)
+        ttk.Checkbutton(
+            effect_toolbar,
+            text="启用当前效果",
+            variable=self.audio_selected_effect_enabled_var,
+            command=self.on_audio_effect_enabled_changed,
+        ).grid(row=0, column=2, padx=(0, 8))
+        ttk.Button(effect_toolbar, text="仅用当前", command=self.enable_only_current_audio_effect).grid(row=0, column=3, padx=2)
+        ttk.Button(effect_toolbar, text="重置参数", command=self.reset_current_audio_effect).grid(row=0, column=4, padx=2)
+        ttk.Button(effect_toolbar, text="全部关闭", command=self.disable_all_audio_effects).grid(row=0, column=5, padx=(2, 0))
+
         ttk.Label(
             self.audio_controls_frame,
-            text="选择预设会替换下方勾选；参数调整不会切换效果。",
+            textvariable=self.audio_effect_description_var,
             foreground="#666666",
-        ).grid(row=0, column=2, sticky=tk.W)
-
-        effects_frame = ttk.LabelFrame(
-            self.audio_controls_frame,
-            text="1. 选择画面效果（可多选叠加）",
-            padding=(8, 5),
-        )
-        effects_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(8, 0))
-        for column in range(5):
-            effects_frame.columnconfigure(column, weight=1)
-        for index, (name, label) in enumerate(self.AUDIO_EFFECTS.items()):
-            ttk.Checkbutton(
-                effects_frame,
-                text=label,
-                variable=self.audio_effect_vars[name],
-                command=lambda effect=name: self.on_audio_effect_changed(effect),
-            ).grid(row=index // 5, column=index % 5, sticky=tk.W, padx=(0, 8), pady=2)
-
+            wraplength=680,
+        ).grid(row=1, column=0, sticky=tk.W, pady=(5, 1))
         ttk.Label(
             self.audio_controls_frame,
-            text="2. 调整效果参数（每组已标明作用对象）",
-        ).grid(row=2, column=0, columnspan=3, sticky=tk.W, pady=(9, 3))
+            textvariable=self.audio_enabled_summary_var,
+            foreground="#356a8a",
+        ).grid(row=2, column=0, sticky=tk.W, pady=(0, 6))
 
-        parameters_frame = ttk.Frame(self.audio_controls_frame)
-        parameters_frame.grid(row=3, column=0, columnspan=3, sticky=(tk.W, tk.E))
-        parameters_frame.columnconfigure(0, weight=1, uniform="audio_parameter_group")
-        parameters_frame.columnconfigure(1, weight=1, uniform="audio_parameter_group")
+        parameter_columns = ttk.Frame(self.audio_controls_frame)
+        parameter_columns.grid(row=3, column=0, sticky=(tk.W, tk.E))
+        parameter_columns.columnconfigure(0, weight=1, uniform="audio_settings")
+        parameter_columns.columnconfigure(1, weight=1, uniform="audio_settings")
 
-        for group_index, (group_name, target_text, parameter_names) in enumerate(self.AUDIO_PARAMETER_GROUPS):
-            group_frame = ttk.LabelFrame(parameters_frame, text=group_name, padding=(7, 5))
-            group_frame.grid(
-                row=group_index // 2,
-                column=group_index % 2,
-                sticky=(tk.W, tk.E, tk.N, tk.S),
-                padx=(0, 4) if group_index % 2 == 0 else (4, 0),
-                pady=(0, 4) if group_index < 2 else (4, 0),
-            )
-            group_frame.columnconfigure(1, weight=1)
-            ttk.Label(
-                group_frame,
-                text=target_text,
-                foreground="#666666",
-                wraplength=300,
-            ).grid(row=0, column=0, columnspan=3, sticky=tk.W, pady=(0, 3))
+        input_frame = ttk.LabelFrame(parameter_columns, text="输入分析（全局）", padding=(8, 5))
+        input_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 4))
+        input_frame.columnconfigure(0, weight=1)
+        ttk.Label(
+            input_frame,
+            text="只负责采集和节拍检测，不包含任何画面参数。",
+            foreground="#666666",
+            wraplength=300,
+        ).grid(row=0, column=0, sticky=tk.W, pady=(0, 4))
+        self.audio_input_parameters_frame = ttk.Frame(input_frame)
+        self.audio_input_parameters_frame.grid(row=1, column=0, sticky=(tk.W, tk.E))
+        self.audio_input_parameters_frame.columnconfigure(1, weight=1)
 
-            for row_index, name in enumerate(parameter_names, start=1):
-                label, minimum, maximum, _, _ = self.AUDIO_PARAMETERS[name]
-                ttk.Label(group_frame, text=f"{label}:").grid(
-                    row=row_index, column=0, sticky=tk.W, pady=2
-                )
-                scale = ttk.Scale(
-                    group_frame,
-                    from_=minimum,
-                    to=maximum,
-                    variable=self.audio_parameter_vars[name],
-                    command=lambda value, parameter=name: self.on_audio_parameter_changed(parameter, value),
-                )
-                scale.grid(row=row_index, column=1, sticky=(tk.W, tk.E), padx=5, pady=2)
-                ttk.Label(
-                    group_frame,
-                    textvariable=self.audio_parameter_value_vars[name],
-                    width=5,
-                    anchor=tk.E,
-                ).grid(row=row_index, column=2, sticky=tk.E, pady=2)
+        effect_frame = ttk.LabelFrame(parameter_columns, text="当前效果专属参数", padding=(8, 5))
+        effect_frame.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(4, 0))
+        effect_frame.columnconfigure(0, weight=1)
+        self.audio_effect_parameters_frame = ttk.Frame(effect_frame)
+        self.audio_effect_parameters_frame.grid(row=0, column=0, sticky=(tk.W, tk.E))
+        self.audio_effect_parameters_frame.columnconfigure(1, weight=1)
 
         self.audio_controls_frame.grid_remove()
 
@@ -734,7 +659,7 @@ class YAMLConfigEditor:
         self.status_var.set("请拖动鼠标选择截图区域")
 
     def refresh_audio_controls(self):
-        """按当前音频源的真实运行时配置刷新控制面板。"""
+        """从当前音频源读取效果目录、参数元数据和运行时值。"""
         source_id = self.get_selected_source_id()
         if not source_id or self.source_type_by_id.get(source_id) != 'audio_visualization':
             self.audio_controls_frame.grid_remove()
@@ -743,14 +668,29 @@ class YAMLConfigEditor:
         try:
             info = streamer.get_source_info(source_id)
             config = info.get('config', {})
+            audio_ui = info.get('audio_ui', {})
             self.updating_audio_controls = True
-            for name, variable in self.audio_effect_vars.items():
-                variable.set(bool(config.get(name, False)))
-            for name, variable in self.audio_parameter_vars.items():
-                if name in config:
-                    variable.set(float(config[name]))
-                self.update_audio_parameter_label(name, variable.get())
-            self.audio_preset_var.set(self.find_matching_audio_preset())
+            self.audio_effect_catalog = list(audio_ui.get('effects', []))
+            self.audio_effect_meta = {item['id']: item for item in self.audio_effect_catalog}
+            self.audio_effect_label_to_id = {item['label']: item['id'] for item in self.audio_effect_catalog}
+            self.audio_effect_config = dict(config.get('effects', {}))
+            self.audio_input_catalog = list(audio_ui.get('input_parameters', []))
+
+            labels = [item['label'] for item in self.audio_effect_catalog]
+            self.audio_effect_combo.configure(values=labels)
+            selected_label = self.audio_selected_effect_var.get()
+            if selected_label not in self.audio_effect_label_to_id:
+                selected_id = next(
+                    (item['id'] for item in self.audio_effect_catalog
+                     if self.audio_effect_config.get(item['id'], {}).get('enabled')),
+                    self.audio_effect_catalog[0]['id'] if self.audio_effect_catalog else None,
+                )
+                selected_label = self.audio_effect_meta[selected_id]['label'] if selected_id else ""
+                self.audio_selected_effect_var.set(selected_label)
+
+            self.rebuild_audio_input_parameters(config.get('input', {}))
+            self.rebuild_selected_audio_effect()
+            self.update_audio_enabled_summary()
             self.audio_controls_frame.grid()
         except Exception as e:
             self.audio_controls_frame.grid_remove()
@@ -758,14 +698,95 @@ class YAMLConfigEditor:
         finally:
             self.updating_audio_controls = False
 
-    def find_matching_audio_preset(self):
-        enabled = {
-            name for name, variable in self.audio_effect_vars.items() if variable.get()
-        }
-        for preset_name, preset_effects in self.AUDIO_PRESETS.items():
-            if enabled == preset_effects:
-                return preset_name
-        return '自定义'
+    @staticmethod
+    def clear_frame(frame):
+        for child in frame.winfo_children():
+            child.destroy()
+
+    @staticmethod
+    def normalize_audio_parameter(spec, value):
+        minimum = float(spec['min'])
+        maximum = float(spec['max'])
+        step = float(spec['step'])
+        digits = int(spec.get('digits', 2))
+        numeric = max(minimum, min(maximum, float(value)))
+        numeric = round(numeric / step) * step
+        return int(round(numeric)) if digits == 0 else round(numeric, digits)
+
+    @staticmethod
+    def format_audio_parameter(spec, value):
+        return f"{float(value):.{int(spec.get('digits', 2))}f}"
+
+    def add_audio_parameter_row(self, parent, row, spec, value, callback, variable_store, value_store):
+        name = spec['name']
+        variable = tk.DoubleVar(value=float(value))
+        value_variable = tk.StringVar(value=self.format_audio_parameter(spec, value))
+        variable_store[name] = variable
+        value_store[name] = value_variable
+        ttk.Label(parent, text=f"{spec['label']}:").grid(row=row, column=0, sticky=tk.W, pady=2)
+        ttk.Scale(
+            parent,
+            from_=spec['min'],
+            to=spec['max'],
+            variable=variable,
+            command=lambda raw, item=spec: callback(item, raw),
+        ).grid(row=row, column=1, sticky=(tk.W, tk.E), padx=5, pady=2)
+        ttk.Label(parent, textvariable=value_variable, width=7, anchor=tk.E).grid(
+            row=row, column=2, sticky=tk.E, pady=2
+        )
+
+    def rebuild_audio_input_parameters(self, values):
+        self.clear_frame(self.audio_input_parameters_frame)
+        self.audio_input_vars = {}
+        self.audio_input_value_vars = {}
+        for row, spec in enumerate(self.audio_input_catalog):
+            value = values.get(spec['name'], spec['default'])
+            self.add_audio_parameter_row(
+                self.audio_input_parameters_frame,
+                row,
+                spec,
+                value,
+                self.on_audio_input_parameter_changed,
+                self.audio_input_vars,
+                self.audio_input_value_vars,
+            )
+
+    def get_selected_audio_effect_id(self):
+        return self.audio_effect_label_to_id.get(self.audio_selected_effect_var.get())
+
+    def rebuild_selected_audio_effect(self):
+        self.clear_frame(self.audio_effect_parameters_frame)
+        self.audio_effect_parameter_vars = {}
+        self.audio_effect_parameter_value_vars = {}
+        effect_id = self.get_selected_audio_effect_id()
+        if not effect_id:
+            self.audio_selected_effect_enabled_var.set(False)
+            self.audio_effect_description_var.set("没有可用的效果模块")
+            return
+        metadata = self.audio_effect_meta[effect_id]
+        current = self.audio_effect_config.get(effect_id, {})
+        self.audio_selected_effect_enabled_var.set(bool(current.get('enabled', False)))
+        self.audio_effect_description_var.set(metadata.get('description', ''))
+        values = current.get('params', {})
+        for row, spec in enumerate(metadata.get('parameters', [])):
+            value = values.get(spec['name'], spec['default'])
+            self.add_audio_parameter_row(
+                self.audio_effect_parameters_frame,
+                row,
+                spec,
+                value,
+                self.on_audio_effect_parameter_changed,
+                self.audio_effect_parameter_vars,
+                self.audio_effect_parameter_value_vars,
+            )
+
+    def update_audio_enabled_summary(self):
+        enabled = [
+            item['label'] for item in self.audio_effect_catalog
+            if self.audio_effect_config.get(item['id'], {}).get('enabled')
+        ]
+        summary = "已启用：" + ("、".join(enabled) if enabled else "无（仅显示背景）")
+        self.audio_enabled_summary_var.set(summary)
 
     def apply_audio_runtime_config(self, config):
         if self.updating_audio_controls:
@@ -781,39 +802,68 @@ class YAMLConfigEditor:
             self.log_message(f"更新音频视觉参数失败: {str(e)}")
             self.refresh_audio_controls()
 
-    def on_audio_preset_selected(self, event=None):
-        preset_name = self.audio_preset_var.get()
-        if preset_name not in self.AUDIO_PRESETS:
-            return
-        enabled = self.AUDIO_PRESETS[preset_name]
-        config = {}
+    def on_audio_effect_selected(self, event=None):
         self.updating_audio_controls = True
         try:
-            for name, variable in self.audio_effect_vars.items():
-                value = name in enabled
-                variable.set(value)
-                config[name] = value
+            self.rebuild_selected_audio_effect()
         finally:
             self.updating_audio_controls = False
-        self.apply_audio_runtime_config(config)
-        self.log_message(f"已切换音频视觉效果: {preset_name}")
 
-    def on_audio_effect_changed(self, effect):
-        self.audio_preset_var.set(self.find_matching_audio_preset())
-        self.apply_audio_runtime_config({effect: self.audio_effect_vars[effect].get()})
+    def on_audio_effect_enabled_changed(self):
+        effect_id = self.get_selected_audio_effect_id()
+        if not effect_id:
+            return
+        enabled = self.audio_selected_effect_enabled_var.get()
+        self.audio_effect_config.setdefault(effect_id, {})['enabled'] = enabled
+        self.update_audio_enabled_summary()
+        self.apply_audio_runtime_config({'effects': {effect_id: {'enabled': enabled}}})
 
-    def update_audio_parameter_label(self, parameter, value):
-        digits = self.AUDIO_PARAMETERS[parameter][4]
-        self.audio_parameter_value_vars[parameter].set(f"{float(value):.{digits}f}")
+    def enable_only_current_audio_effect(self):
+        effect_id = self.get_selected_audio_effect_id()
+        if not effect_id:
+            return
+        effects = {
+            item['id']: {'enabled': item['id'] == effect_id}
+            for item in self.audio_effect_catalog
+        }
+        for item_id, item_config in effects.items():
+            self.audio_effect_config.setdefault(item_id, {})['enabled'] = item_config['enabled']
+        self.audio_selected_effect_enabled_var.set(True)
+        self.update_audio_enabled_summary()
+        self.apply_audio_runtime_config({'effects': effects})
 
-    def on_audio_parameter_changed(self, parameter, value):
-        _, minimum, maximum, step, digits = self.AUDIO_PARAMETERS[parameter]
-        numeric_value = max(minimum, min(maximum, float(value)))
-        numeric_value = round(numeric_value / step) * step
-        if digits == 0:
-            numeric_value = int(round(numeric_value))
-        self.update_audio_parameter_label(parameter, numeric_value)
-        self.apply_audio_runtime_config({parameter: numeric_value})
+    def disable_all_audio_effects(self):
+        effects = {item['id']: {'enabled': False} for item in self.audio_effect_catalog}
+        for item_id in effects:
+            self.audio_effect_config.setdefault(item_id, {})['enabled'] = False
+        self.audio_selected_effect_enabled_var.set(False)
+        self.update_audio_enabled_summary()
+        self.apply_audio_runtime_config({'effects': effects})
+
+    def reset_current_audio_effect(self):
+        effect_id = self.get_selected_audio_effect_id()
+        if not effect_id:
+            return
+        self.apply_audio_runtime_config({'effects': {effect_id: {'reset': True}}})
+        self.refresh_audio_controls()
+
+    def on_audio_input_parameter_changed(self, spec, value):
+        numeric = self.normalize_audio_parameter(spec, value)
+        self.audio_input_value_vars[spec['name']].set(self.format_audio_parameter(spec, numeric))
+        self.apply_audio_runtime_config({'input': {spec['name']: numeric}})
+
+    def on_audio_effect_parameter_changed(self, spec, value):
+        effect_id = self.get_selected_audio_effect_id()
+        if not effect_id:
+            return
+        numeric = self.normalize_audio_parameter(spec, value)
+        self.audio_effect_parameter_value_vars[spec['name']].set(
+            self.format_audio_parameter(spec, numeric)
+        )
+        self.audio_effect_config.setdefault(effect_id, {}).setdefault('params', {})[spec['name']] = numeric
+        self.apply_audio_runtime_config({
+            'effects': {effect_id: {'params': {spec['name']: numeric}}}
+        })
 
     def log_message(self, message):
         """添加消息到日志框"""

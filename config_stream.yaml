@@ -6,22 +6,94 @@ streamer:
     - type: "audio_visualization"
       id: 'audio_visual1'
       params:
-        draw_waveform: True # 特效：波形
-        draw_spectrum_bar: True # 特效：频谱柱
-        draw_spectrum_circular1: False # 圆环特效1：三个独立的律动圆
-        draw_spectrum_circular2: True  # 圆环特效2：红蓝白电离
-        draw_spectrum_circular3: False # 圆环特效3：白色动态圆环+内外双律动扩散
-        draw_neon_mirror: False # 特效：上下对称的霓虹频谱柱
-        draw_aurora: False # 特效：多层极光山脉
-        draw_starburst: False # 特效：环形放射星芒
-        draw_waterfall: False # 特效：滚动彩色频谱瀑布
-        draw_particles: True # 特效：底部发射粒子
-        gain: 1.0 # 灵敏度（0.1-4.0）
-        spectrum_smoothing: 0.5 # 频谱平滑（0.0-0.95）
-        radius_smoothing: 0.9 # 律动平滑（0.0-0.98）
-        base_radius: 60 # 圆环基础半径（20-100）
-        radius_expansion: 30 # 圆环律动幅度（5-100）
-        max_particles: 200 # 最大粒子数（0-500）
+        # 输入分析参数与画面效果彻底分开。
+        input:
+          gain: 1.0
+          noise_gate: 0.0015
+          beat_sensitivity: 1.25
+
+        # 每个效果拥有独立开关和 params；新增/删除效果无需修改 UI。
+        effects:
+          waveform:
+            enabled: false
+            params:
+              amplitude: 0.82
+              thickness: 2
+              smoothing: 0.58
+              glow: 0.85
+              hue_speed: 0.28
+          spectrum_bars:
+            enabled: true
+            params:
+              bars: 32
+              height: 0.72
+              smoothing: 0.76
+              gap: 2
+              glow: 0.72
+          orbital_rings:
+            enabled: false
+            params:
+              radius: 50
+              spread: 9
+              response: 21
+              rotation: 0.18
+              smoothing: 0.72
+          chroma_ring:
+            enabled: false
+            params:
+              radius: 54
+              length: 29
+              thickness: 2
+              smoothing: 0.68
+              hue: 118
+          pulse_tunnel:
+            enabled: false
+            params:
+              rings: 6
+              spacing: 13
+              pulse: 13
+              speed: 0.65
+              thickness: 2
+          mirror_bars:
+            enabled: false
+            params:
+              bars: 36
+              height: 0.39
+              smoothing: 0.79
+              glow: 0.9
+              hue: 140
+          aurora:
+            enabled: false
+            params:
+              layers: 4
+              height: 0.48
+              flow: 0.32
+              smoothing: 0.86
+              glow: 0.82
+          starburst:
+            enabled: false
+            params:
+              spokes: 64
+              radius: 35
+              length: 54
+              rotation: 0.22
+              smoothing: 0.7
+          waterfall:
+            enabled: false
+            params:
+              bands: 64
+              speed: 2
+              brightness: 1.15
+              smoothing: 0.62
+              blend: 0.76
+          particles:
+            enabled: true
+            params:
+              count: 120
+              spawn: 0.8
+              speed: 1.0
+              size: 3.2
+              drift: 0.65
 
 
 

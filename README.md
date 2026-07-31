@@ -71,30 +71,39 @@ streamer:
 经过这一步，你的电脑将恢复声音。
 
 ### 四、在配置文件中添加源类型“音频可视化"
-找到`config_stream.yaml`，添加一个源，指定type字段为"audio_visualization"，在id中随意输入名称，在params中选择需要的可视化效果。
+找到 `config_stream.yaml`，添加一个源，指定 `type: audio_visualization`。输入分析参数放在 `input`，每个画面效果则在 `effects.<效果ID>` 下拥有自己的开关和 `params`，不会再与其他效果共用参数。
 ```yaml
     - type: "audio_visualization"
       id: 'audio_visual1'
       params:
-        draw_waveform: True # 特效：波形
-        draw_spectrum_bar: True # 特效：频谱柱
-        draw_spectrum_circular1: False # 圆环特效1：三个独立的律动圆
-        draw_spectrum_circular2: True  # 圆环特效2：红蓝白电离
-        draw_spectrum_circular3: False # 圆环特效3：白色动态圆环+内外双律动扩散
-        draw_neon_mirror: False # 特效：上下对称的霓虹频谱柱
-        draw_aurora: False # 特效：多层极光山脉
-        draw_starburst: False # 特效：环形放射星芒
-        draw_waterfall: False # 特效：滚动彩色频谱瀑布
-        draw_particles: True # 特效：底部发射粒子
-        gain: 1.0 # 灵敏度：0.1-4.0
-        spectrum_smoothing: 0.5 # 频谱平滑：0.0-0.95
-        radius_smoothing: 0.9 # 律动平滑：0.0-0.98
-        base_radius: 60 # 圆环基础半径：20-100
-        radius_expansion: 30 # 圆环律动幅度：5-100
-        max_particles: 200 # 最大粒子数：0-500
+        input:
+          gain: 1.0
+          noise_gate: 0.0015
+          beat_sensitivity: 1.25
+        effects:
+          spectrum_bars:
+            enabled: true
+            params:
+              bars: 32
+              height: 0.72
+              smoothing: 0.76
+              gap: 2
+              glow: 0.72
+          particles:
+            enabled: true
+            params:
+              count: 120
+              spawn: 0.8
+              speed: 1.0
+              size: 3.2
+              drift: 0.65
 ```
 
-程序运行后，在“图像源”中选择音频可视化源，界面会自动展开“音频视觉效果”面板。可以直接切换效果组合、自由叠加单项效果和拖动参数滑块；修改会实时作用于当前画面，不需要停止或重新启动推流。新增的“霓虹镜像”“极光山脉”“放射星芒”和“频谱瀑布”都可单独使用，也可以尝试“赛博舞台”组合。界面修改只影响本次运行，如需作为下次启动的默认值，请同时写入上面的 `config_stream.yaml` 参数。
+内置效果包括：丝带波形、玻璃频谱、轨道脉冲、棱镜光环、脉冲隧道、镜像城市、极光丝幕、星芒脉冲、流光瀑布和萤火粒子。完整参数示例见仓库中的 `config_stream.yaml`。
+
+程序运行后，在“图像源”中选择音频可视化源，界面会展开“音频可视化工作台”。下拉框一次只编辑一个效果的专属参数，但多个效果仍可同时启用叠加；“仅用当前”“重置参数”和“全部关闭”均实时生效，不会重启推流。界面修改只影响本次运行，如需作为下次启动的默认值，请同步修改 `config_stream.yaml`。
+
+每个效果的实现、参数定义和运行状态均位于 `capture/audio_visualization_source/effects/` 下的独立脚本。新增效果时创建新的效果类并在该目录的 `__init__.py` 注册即可，UI 会自动读取名称、说明和参数范围。
 
 最后，别忘了在配置文件底部选择激活，这里输入上面配置的id名称。
 ```yaml
@@ -143,16 +152,27 @@ streamer:
     - type: "audio_visualization"
       id: 'audio_visual1'
       params:
-        draw_waveform: True # 特效：波形
-        draw_spectrum_bar: True # 特效：频谱柱
-        draw_spectrum_circular1: False # 圆环特效1：三个独立的律动圆
-        draw_spectrum_circular2: True  # 圆环特效2：红蓝白电离
-        draw_spectrum_circular3: False # 圆环特效3：白色动态圆环+内外双律动扩散
-        draw_neon_mirror: False # 特效：上下对称的霓虹频谱柱
-        draw_aurora: False # 特效：多层极光山脉
-        draw_starburst: False # 特效：环形放射星芒
-        draw_waterfall: False # 特效：滚动彩色频谱瀑布
-        draw_particles: True # 特效：底部发射粒子
+        input:
+          gain: 1.0
+          noise_gate: 0.0015
+          beat_sensitivity: 1.25
+        effects:
+          spectrum_bars:
+            enabled: true
+            params:
+              bars: 32
+              height: 0.72
+              smoothing: 0.76
+              gap: 2
+              glow: 0.72
+          particles:
+            enabled: true
+            params:
+              count: 120
+              spawn: 0.8
+              speed: 1.0
+              size: 3.2
+              drift: 0.65
 
 
 
