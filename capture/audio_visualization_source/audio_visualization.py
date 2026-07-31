@@ -40,6 +40,12 @@ class AudioVisualizer:
         self.time_data = np.zeros(self.BLOCK_SIZE, dtype=np.float32)
         self.smoothed_spectrum = np.zeros(self.BLOCK_SIZE // 2 + 1, dtype=np.float32)
         self.smoothing_factor = 0.5
+        # Each effect keeps its own band smoothing so combinations do not affect
+        # one another.  Waterfall and peak state are allocated for the 240x240
+        # output but also work with other canvas sizes.
+        self.effect_smoothing = {}
+        self.neon_peaks = np.zeros(48, dtype=np.float32)
+        self.waterfall_history = np.zeros((max(32, self.HEIGHT // 2), 64), dtype=np.float32)
 
         # 律动检测参数
         self.base_radius = min(self.WIDTH, self.HEIGHT) // 4  # 基础半径
@@ -183,6 +189,162 @@ class AudioVisualizer:
                               (bar_x, self.HEIGHT - bar_height),
                               (bar_x + bar_width - 1, self.HEIGHT),
                               (blue, green, red), -1)
+
+    def _get_frequency_bands(self, count: int, key: str) -> np.ndarray:
+        """Return log-spaced, compressed and temporally smoothed FFT bands."""
+        spectrum = np.asarray(self.spectrum, dtype=np.float32)
+        if len(spectrum) < 3 or not np.any(spectrum > 0):
+            bands = np.zeros(count, dtype=np.float32)
+        else:
+            # Logarithmic buckets devote more pixels to bass and mid frequencies,
+            # which reads much better than raw FFT bins on a tiny square screen.
+            upper_bin = max(3, min(len(spectrum) - 1, int(len(spectrum) * 0.78)))
+            edges = np.geomspace(1, upper_bin, count + 1)
+            bands = np.empty(count, dtype=np.float32)
+            for i in range(count):
+                start = max(1, int(edges[i]))
+                end = max(start + 1, int(edges[i + 1]))
+                bands[i] = float(np.mean(spectrum[start:min(end, len(spectrum))]))
+            bands = np.log1p(bands)
+            peak = float(np.percentile(bands, 96))
+            if peak > 1e-6:
+                bands = np.clip(bands / peak, 0.0, 1.0)
+            else:
+                bands.fill(0)
+
+        previous = self.effect_smoothing.get(key)
+        if previous is None or len(previous) != count:
+            previous = np.zeros(count, dtype=np.float32)
+        # Let attacks through quickly while retaining the configured smooth decay.
+        decay = float(np.clip(self.smoothing_factor, 0.0, 0.95))
+        smoothed = np.where(bands >= previous,
+                            previous * 0.25 + bands * 0.75,
+                            previous * decay + bands * (1.0 - decay))
+        self.effect_smoothing[key] = smoothed
+        return smoothed
+
+    @staticmethod
+    def _add_glow(img: np.ndarray, glow: np.ndarray, sigma: float = 6.0,
+                  strength: float = 0.75) -> None:
+        """Blend a cheap neon bloom layer into ``img`` in place."""
+        blurred = cv2.GaussianBlur(glow, (0, 0), sigmaX=sigma, sigmaY=sigma)
+        cv2.addWeighted(img, 1.0, blurred, strength, 0, dst=img)
+        cv2.add(img, glow, dst=img)
+
+    def _draw_neon_mirror(self, img: np.ndarray) -> None:
+        """Neon equalizer mirrored around the horizontal centre line."""
+        count = 48
+        bands = self._get_frequency_bands(count, 'neon_mirror')
+        if len(self.neon_peaks) != count:
+            self.neon_peaks = np.zeros(count, dtype=np.float32)
+        self.neon_peaks = np.maximum(bands, self.neon_peaks - 0.018)
+
+        glow = np.zeros_like(img)
+        crisp = np.zeros_like(img)
+        center_y = self.HEIGHT // 2
+        slot = self.WIDTH / count
+        max_height = max(8, int(self.HEIGHT * 0.43))
+
+        cv2.line(glow, (0, center_y), (self.WIDTH - 1, center_y), (160, 30, 120), 3)
+        for i, value in enumerate(bands):
+            x1 = int(i * slot + 1)
+            x2 = max(x1, int((i + 1) * slot - 1))
+            height = max(1, int(value * max_height))
+            ratio = i / max(1, count - 1)
+            # OpenCV uses BGR: cyan -> violet -> hot pink.
+            color = (
+                int(255 - 80 * ratio),
+                int(220 * (1.0 - abs(ratio - 0.35) * 1.35)),
+                int(70 + 185 * ratio),
+            )
+            color = tuple(max(0, min(255, channel)) for channel in color)
+            cv2.rectangle(glow, (x1, center_y - height), (x2, center_y + height), color, -1)
+            cv2.rectangle(crisp, (x1, center_y - height), (x2, center_y + height), color, -1)
+
+            peak_y = int(self.neon_peaks[i] * max_height)
+            cv2.line(crisp, (x1, center_y - peak_y), (x2, center_y - peak_y), (255, 255, 255), 1)
+            cv2.line(crisp, (x1, center_y + peak_y), (x2, center_y + peak_y), (255, 255, 255), 1)
+
+        self._add_glow(img, glow, sigma=5.0, strength=0.65)
+        cv2.add(img, crisp, dst=img)
+
+    def _draw_aurora(self, img: np.ndarray) -> None:
+        """Layered, softly glowing spectrum ridges resembling an aurora."""
+        count = 72
+        bands = self._get_frequency_bands(count, 'aurora')
+        # A small spatial blur removes jagged FFT bucket transitions.
+        bands = cv2.GaussianBlur(bands.reshape(1, -1), (9, 1), 0).ravel()
+        x_values = np.linspace(0, self.WIDTH - 1, count).astype(np.int32)
+        baseline = int(self.HEIGHT * 0.80)
+        layers = (
+            (0.48, 24, (255, 55, 205)),
+            (0.66, 12, (220, 80, 255)),
+            (0.88, 0, (90, 255, 175)),
+        )
+        glow = np.zeros_like(img)
+
+        for scale, offset, color in layers:
+            heights = bands * self.HEIGHT * scale
+            ridge = np.column_stack((x_values, baseline - offset - heights.astype(np.int32)))
+            polygon = np.vstack((ridge, (self.WIDTH - 1, baseline), (0, baseline))).astype(np.int32)
+            fill = np.zeros_like(img)
+            cv2.fillPoly(fill, [polygon], color)
+            cv2.addWeighted(glow, 1.0, fill, 0.18, 0, dst=glow)
+            cv2.polylines(glow, [ridge], False, color, 3, cv2.LINE_AA)
+
+        self._add_glow(img, glow, sigma=8.0, strength=0.8)
+        # Pin-sharp white-green crest gives the soft layers a readable silhouette.
+        crest_y = baseline - (bands * self.HEIGHT * 0.88).astype(np.int32)
+        crest = np.column_stack((x_values, crest_y)).astype(np.int32)
+        cv2.polylines(img, [crest], False, (190, 255, 225), 1, cv2.LINE_AA)
+
+    def _draw_starburst(self, img: np.ndarray) -> None:
+        """Radial starburst with mirrored frequency bands and neon bloom."""
+        rays = 96
+        half = rays // 2
+        source = self._get_frequency_bands(half, 'starburst')
+        bands = np.concatenate((source, source[::-1]))
+        center = (self.WIDTH // 2, self.HEIGHT // 2)
+        base_radius = max(24, int(min(self.WIDTH, self.HEIGHT) * 0.19))
+        max_length = int(min(self.WIDTH, self.HEIGHT) * 0.28)
+        glow = np.zeros_like(img)
+        crisp = np.zeros_like(img)
+
+        for i, value in enumerate(bands):
+            angle = 2.0 * np.pi * i / rays - np.pi / 2
+            nx, ny = np.cos(angle), np.sin(angle)
+            inner = base_radius + int(3 * np.sin(angle * 5))
+            outer = inner + 3 + int((value ** 0.72) * max_length)
+            p1 = (int(center[0] + nx * inner), int(center[1] + ny * inner))
+            p2 = (int(center[0] + nx * outer), int(center[1] + ny * outer))
+            hue = int((i / rays) * 179)
+            bgr = cv2.cvtColor(np.uint8([[[hue, 235, 255]]]), cv2.COLOR_HSV2BGR)[0, 0]
+            color = tuple(int(channel) for channel in bgr)
+            cv2.line(glow, p1, p2, color, 4, cv2.LINE_AA)
+            cv2.line(crisp, p1, p2, color, 1, cv2.LINE_AA)
+
+        cv2.circle(glow, center, base_radius, (255, 170, 255), 4, cv2.LINE_AA)
+        self._add_glow(img, glow, sigma=6.0, strength=0.8)
+        cv2.add(img, crisp, dst=img)
+        cv2.circle(img, center, base_radius, (255, 245, 255), 1, cv2.LINE_AA)
+
+    def _draw_waterfall(self, img: np.ndarray) -> None:
+        """Scrolling time/frequency heat map; newest spectrum is at the bottom."""
+        count = 64
+        bands = self._get_frequency_bands(count, 'waterfall')
+        if self.waterfall_history.shape[1] != count:
+            self.waterfall_history = np.zeros((max(32, self.HEIGHT // 2), count), dtype=np.float32)
+        self.waterfall_history[:-1] = self.waterfall_history[1:]
+        self.waterfall_history[-1] = bands ** 0.72
+
+        heat = np.clip(self.waterfall_history * 255, 0, 255).astype(np.uint8)
+        heat = cv2.resize(heat, (self.WIDTH, self.HEIGHT), interpolation=cv2.INTER_CUBIC)
+        colored = cv2.applyColorMap(heat, cv2.COLORMAP_TURBO)
+        # Keep silent areas near black instead of the default dark-red colormap floor.
+        colored[heat < 5] = 0
+        cv2.addWeighted(img, 0.35, colored, 0.90, 0, dst=img)
+        cv2.line(img, (0, self.HEIGHT - 2), (self.WIDTH - 1, self.HEIGHT - 2),
+                 (255, 255, 255), 1)
 
     def _draw_waveform(self, img: np.ndarray) -> None:
         """绘制波形图[4](@ref)"""
@@ -475,6 +637,10 @@ class AudioVisualizer:
                   draw_spectrum_circular1 = False,
                   draw_spectrum_circular2 = True,
                   draw_spectrum_circular3 = False,
+                  draw_neon_mirror = False,
+                  draw_aurora = False,
+                  draw_starburst = False,
+                  draw_waterfall = False,
                   draw_particles = True
                   ) -> np.ndarray:
         """
@@ -499,6 +665,10 @@ class AudioVisualizer:
         if draw_spectrum_circular1: self._draw_circular_spectrum(img)  # 三个环
         if draw_spectrum_circular2: self._draw_circular_spectrum2(img)  # 红白蓝电离
         if draw_spectrum_circular3: self._draw_circular_spectrum3(img)  # 动态圆环+内外双律动扩散
+        if draw_waterfall: self._draw_waterfall(img)  # 彩色频谱瀑布
+        if draw_aurora: self._draw_aurora(img)  # 极光山脉
+        if draw_neon_mirror: self._draw_neon_mirror(img)  # 霓虹镜像柱
+        if draw_starburst: self._draw_starburst(img)  # 放射星芒
         if draw_particles:
             self._update_particles()
             self._draw_particles(img)
@@ -555,12 +725,16 @@ class AudioVisualizer:
 if __name__ == '__main__':
     av = AudioVisualizer(width=240, height=240, block_size=512)
     while True:
-        cv2.imshow('av', av.get_frame(
-            draw_spectrum_bar=True,
-            draw_spectrum_circular1=False,
-            draw_spectrum_circular2=False,
-            draw_spectrum_circular3=True,
-            draw_particles=True,
+        cv2.imshow('av', av.get_frame(draw_waveform=False,
+                  draw_spectrum_bar = False,
+                  draw_spectrum_circular1 = False,
+                  draw_spectrum_circular2 = False,
+                  draw_spectrum_circular3 = False,
+                  draw_neon_mirror = False,
+                  draw_aurora = False,
+                  draw_starburst = True,
+                  draw_waterfall = False,
+                  draw_particles = False
         ))
         key = cv2.waitKey(1)
         if key == ord('q'):

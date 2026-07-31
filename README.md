@@ -81,6 +81,10 @@ streamer:
         draw_spectrum_circular1: False # 圆环特效1：三个独立的律动圆
         draw_spectrum_circular2: True  # 圆环特效2：红蓝白电离
         draw_spectrum_circular3: False # 圆环特效3：白色动态圆环+内外双律动扩散
+        draw_neon_mirror: False # 特效：上下对称的霓虹频谱柱
+        draw_aurora: False # 特效：多层极光山脉
+        draw_starburst: False # 特效：环形放射星芒
+        draw_waterfall: False # 特效：滚动彩色频谱瀑布
         draw_particles: True # 特效：底部发射粒子
         gain: 1.0 # 灵敏度：0.1-4.0
         spectrum_smoothing: 0.5 # 频谱平滑：0.0-0.95
@@ -90,7 +94,7 @@ streamer:
         max_particles: 200 # 最大粒子数：0-500
 ```
 
-程序运行后，在“图像源”中选择音频可视化源，界面会自动展开“音频视觉效果”面板。可以直接切换效果组合、自由叠加单项效果和拖动参数滑块；修改会实时作用于当前画面，不需要停止或重新启动推流。界面修改只影响本次运行，如需作为下次启动的默认值，请同时写入上面的 `config_stream.yaml` 参数。
+程序运行后，在“图像源”中选择音频可视化源，界面会自动展开“音频视觉效果”面板。可以直接切换效果组合、自由叠加单项效果和拖动参数滑块；修改会实时作用于当前画面，不需要停止或重新启动推流。新增的“霓虹镜像”“极光山脉”“放射星芒”和“频谱瀑布”都可单独使用，也可以尝试“赛博舞台”组合。界面修改只影响本次运行，如需作为下次启动的默认值，请同时写入上面的 `config_stream.yaml` 参数。
 
 最后，别忘了在配置文件底部选择激活，这里输入上面配置的id名称。
 ```yaml
@@ -144,6 +148,10 @@ streamer:
         draw_spectrum_circular1: False # 圆环特效1：三个独立的律动圆
         draw_spectrum_circular2: True  # 圆环特效2：红蓝白电离
         draw_spectrum_circular3: False # 圆环特效3：白色动态圆环+内外双律动扩散
+        draw_neon_mirror: False # 特效：上下对称的霓虹频谱柱
+        draw_aurora: False # 特效：多层极光山脉
+        draw_starburst: False # 特效：环形放射星芒
+        draw_waterfall: False # 特效：滚动彩色频谱瀑布
         draw_particles: True # 特效：底部发射粒子
 
 

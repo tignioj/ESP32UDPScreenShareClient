@@ -11,6 +11,10 @@ streamer:
         draw_spectrum_circular1: False # 圆环特效1：三个独立的律动圆
         draw_spectrum_circular2: True  # 圆环特效2：红蓝白电离
         draw_spectrum_circular3: False # 圆环特效3：白色动态圆环+内外双律动扩散
+        draw_neon_mirror: False # 特效：上下对称的霓虹频谱柱
+        draw_aurora: False # 特效：多层极光山脉
+        draw_starburst: False # 特效：环形放射星芒
+        draw_waterfall: False # 特效：滚动彩色频谱瀑布
         draw_particles: True # 特效：底部发射粒子
         gain: 1.0 # 灵敏度（0.1-4.0）
         spectrum_smoothing: 0.5 # 频谱平滑（0.0-0.95）

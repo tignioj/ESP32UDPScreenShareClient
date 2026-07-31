@@ -13,6 +13,10 @@ class AudioVisualizationSource(ImageSourceInterface):
         'draw_spectrum_circular1': False,
         'draw_spectrum_circular2': True,
         'draw_spectrum_circular3': False,
+        'draw_neon_mirror': False,
+        'draw_aurora': False,
+        'draw_starburst': False,
+        'draw_waterfall': False,
         'draw_particles': True,
     }
     PARAMETER_DEFAULTS = {

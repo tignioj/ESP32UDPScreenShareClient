@@ -34,6 +34,10 @@ class YAMLConfigEditor:
         'draw_spectrum_circular1': '三重圆环',
         'draw_spectrum_circular2': '红蓝电离',
         'draw_spectrum_circular3': '双向律动',
+        'draw_neon_mirror': '霓虹镜像',
+        'draw_aurora': '极光山脉',
+        'draw_starburst': '放射星芒',
+        'draw_waterfall': '频谱瀑布',
         'draw_particles': '粒子',
     }
     AUDIO_PRESETS = {
@@ -42,6 +46,11 @@ class YAMLConfigEditor:
         '三重圆环': {'draw_spectrum_circular1'},
         '红蓝电离': {'draw_spectrum_circular2'},
         '双向律动': {'draw_spectrum_circular3'},
+        '霓虹镜像': {'draw_neon_mirror'},
+        '极光山脉': {'draw_aurora'},
+        '放射星芒': {'draw_starburst'},
+        '频谱瀑布': {'draw_waterfall'},
+        '赛博舞台': {'draw_waterfall', 'draw_starburst'},
         '粒子频谱': {'draw_spectrum_bar', 'draw_particles'},
         '全效果': set(AUDIO_EFFECTS),
     }
