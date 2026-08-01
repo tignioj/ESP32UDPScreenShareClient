@@ -46,8 +46,8 @@ class YAMLConfigEditor:
         print("==================================================================================================================")
         self.root = root
         self.root.title("ESP32 UDP 屏幕推流")
-        self.root.geometry("880x880")
-        self.root.minsize(760, 720)
+        self.root.geometry("1180x880")
+        self.root.minsize(920, 720)
 
         # UDP推流相关
         self.streaming = False
@@ -58,6 +58,16 @@ class YAMLConfigEditor:
         # process-specific value also reduces collisions after an app restart.
         self.frame_id = time.time_ns() & 0xFFFF
         self.frame_id_lock = threading.Lock()
+        # 推流预览只展示已经完整发送的量化帧。发送线程负责发布最新帧，
+        # Tk 主线程定时取走并渲染，避免跨线程操作界面控件。
+        self.stream_preview_lock = threading.Lock()
+        self.stream_preview_frame = None
+        self.stream_preview_version = 0
+        self.stream_preview_rendered_version = -1
+        self.stream_preview_image = None
+        self.stream_preview_size = (200, 200)
+        self.stream_preview_job = None
+        self.stream_preview_info_var = tk.StringVar(value="尚未开始推流")
 
         # 默认配置文件
         self.config_file = "config.yaml"
@@ -194,6 +204,7 @@ class YAMLConfigEditor:
         self.load_config()
         self.video_refresh_job = self.root.after(200, self.update_video_playback_status)
         self.video_idle_playback_job = self.root.after(15, self.drive_video_when_not_streaming)
+        self.stream_preview_job = self.root.after(100, self.update_stream_preview)
 
         # 绑定关闭事件
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -682,21 +693,58 @@ class YAMLConfigEditor:
 
         # 推流控制独立于两层配置，切换页签后仍然可见。
         stream_frame = ttk.LabelFrame(main_frame, text="推流控制", padding=8)
-        stream_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(10, 0))
+        stream_frame.grid(row=0, column=1, sticky=(tk.N, tk.E), padx=(10, 0))
+        stream_frame.columnconfigure(0, weight=1)
 
-        self.start_button = ttk.Button(stream_frame, text="开始推流",
+        stream_controls = ttk.Frame(stream_frame)
+        stream_controls.grid(row=0, column=0, sticky=(tk.W, tk.E))
+
+        stream_buttons = ttk.Frame(stream_controls)
+        stream_buttons.pack(anchor=tk.W)
+
+        self.start_button = ttk.Button(stream_buttons, text="开始推流",
                                        command=self.start_streaming,
                                        state=tk.NORMAL if UDP_MODULES_AVAILABLE else tk.DISABLED)
         self.start_button.pack(side=tk.LEFT)
 
-        self.stop_button = ttk.Button(stream_frame, text="停止推流",
+        self.stop_button = ttk.Button(stream_buttons, text="停止推流",
                                       command=self.stop_streaming,
                                       state=tk.DISABLED)
         self.stop_button.pack(side=tk.LEFT, padx=8)
 
+        ttk.Label(
+            stream_controls,
+            textvariable=self.stream_preview_info_var,
+            foreground="#555555",
+        ).pack(anchor=tk.W, pady=(10, 4))
+        ttk.Label(
+            stream_controls,
+            text="预览显示完成缩放和色彩量化后、实际通过 UDP 发送的画面。",
+            foreground="#777777",
+            wraplength=200,
+            justify=tk.LEFT,
+        ).pack(anchor=tk.W)
+
+        stream_preview_frame = ttk.LabelFrame(stream_frame, text="当前推送画面", padding=4)
+        stream_preview_frame.grid(row=1, column=0, sticky=(tk.N, tk.E), pady=(10, 0))
+        stream_preview_surface = ttk.Frame(
+            stream_preview_frame,
+            width=self.stream_preview_size[0],
+            height=self.stream_preview_size[1],
+        )
+        stream_preview_surface.pack()
+        stream_preview_surface.pack_propagate(False)
+        self.stream_preview_label = tk.Label(
+            stream_preview_surface,
+            text="等待开始推流",
+            bg="#161616",
+            fg="#aaaaaa",
+        )
+        self.stream_preview_label.pack(fill=tk.BOTH, expand=True)
+
         # 添加日志显示区域
         log_frame = ttk.LabelFrame(main_frame, text="日志", padding="5")
-        log_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(10, 0))
+        log_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
 
         self.log_text = scrolledtext.ScrolledText(log_frame, height=4, width=58)
         self.log_text.pack(expand=True, fill=tk.BOTH)
@@ -705,7 +753,7 @@ class YAMLConfigEditor:
         # 状态栏
         self.status_var = tk.StringVar(value="就绪")
         status_bar = ttk.Label(main_frame, textvariable=self.status_var, relief=tk.SUNKEN)
-        status_bar.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=(10, 0))
+        status_bar.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
 
         # 配置网格权重
         log_frame.columnconfigure(0, weight=1)
@@ -2103,6 +2151,10 @@ class YAMLConfigEditor:
         udp_interval = float(self.entries['udp_interval'].get())
 
         # 开始推流线程
+        self.clear_stream_preview("等待第一帧")
+        self.stream_preview_info_var.set(
+            f"正在启动 · {width}×{width} · {color_mode_str.upper()}"
+        )
         self.streaming = True
         stop_event = threading.Event()
         self.stream_stop_event = stop_event
@@ -2121,6 +2173,7 @@ class YAMLConfigEditor:
         self.streaming = False
         if self.stream_stop_event is not None:
             self.stream_stop_event.set()
+        self.clear_stream_preview("推流已停止")
 
         # 启用开始按钮，禁用停止按钮
         self.start_button.config(state=tk.NORMAL)
@@ -2136,6 +2189,79 @@ class YAMLConfigEditor:
         g_332 = (g >> 5) & 0x07
         b_332 = (b >> 6) & 0x03
         return (r_332 << 5) | (g_332 << 2) | b_332
+
+    def make_stream_preview_frame(self, converted_frame, color_mode_code):
+        """把线上色彩数据还原为 BGR，预览发送后的实际色彩效果。"""
+        if color_mode_code == ESP32UDPHeader.COLOR_RGB565:
+            return cv2.cvtColor(converted_frame, cv2.COLOR_BGR5652BGR)
+
+        packed = converted_frame.astype(np.uint8, copy=False)
+        red = (((packed >> 5) & 0x07).astype(np.uint16) * 255 // 7).astype(np.uint8)
+        green = (((packed >> 2) & 0x07).astype(np.uint16) * 255 // 7).astype(np.uint8)
+        blue = ((packed & 0x03).astype(np.uint16) * 255 // 3).astype(np.uint8)
+        return cv2.merge((blue, green, red))
+
+    def publish_stream_preview(self, frame, color_mode_str):
+        """由发送线程发布一张已经完整发送的预览帧。"""
+        with self.stream_preview_lock:
+            self.stream_preview_frame = (frame, color_mode_str)
+            self.stream_preview_version += 1
+
+    def clear_stream_preview(self, message):
+        """清空发送线程共享帧，并将预览区恢复为提示文字。"""
+        with self.stream_preview_lock:
+            self.stream_preview_frame = None
+            self.stream_preview_version += 1
+            self.stream_preview_rendered_version = self.stream_preview_version
+        self.stream_preview_image = None
+        self.stream_preview_label.configure(image='', text=message)
+        self.stream_preview_info_var.set(message)
+
+    def update_stream_preview(self):
+        """在 Tk 主线程中刷新推流预览，最多每 100 毫秒渲染一次。"""
+        try:
+            with self.stream_preview_lock:
+                version = self.stream_preview_version
+                item = self.stream_preview_frame
+
+            if item is not None and version != self.stream_preview_rendered_version:
+                frame, color_mode_str = item
+                height, width = frame.shape[:2]
+                preview_width_limit, preview_height_limit = self.stream_preview_size
+                scale = min(
+                    preview_width_limit / max(width, 1),
+                    preview_height_limit / max(height, 1),
+                )
+                preview_width = max(1, int(width * scale))
+                preview_height = max(1, int(height * scale))
+                interpolation = cv2.INTER_AREA if scale < 1 else cv2.INTER_NEAREST
+                preview = cv2.resize(
+                    frame,
+                    (preview_width, preview_height),
+                    interpolation=interpolation,
+                )
+                ok, encoded = cv2.imencode('.png', preview)
+                if ok:
+                    image_data = base64.b64encode(encoded.tobytes()).decode('ascii')
+                    self.stream_preview_image = tk.PhotoImage(data=image_data, format='png')
+                    self.stream_preview_label.configure(
+                        image=self.stream_preview_image,
+                        text='',
+                    )
+                    self.stream_preview_info_var.set(
+                        f"正在推送 · {width}×{height} · {color_mode_str.upper()}"
+                    )
+                    self.stream_preview_rendered_version = version
+        except (RuntimeError, tk.TclError):
+            return
+        except Exception as e:
+            self.log_message(f"刷新推流预览失败: {str(e)}")
+        finally:
+            try:
+                if self.root.winfo_exists():
+                    self.stream_preview_job = self.root.after(100, self.update_stream_preview)
+            except tk.TclError:
+                self.stream_preview_job = None
 
     def stream_udp_data(self, server_ip, server_port, width, color_mode_str, lines_per_packet, udp_interval, stop_event):
         """UDP推流线程函数"""
@@ -2234,6 +2360,12 @@ class YAMLConfigEditor:
                         if stop_event.is_set():
                             break
 
+                    # 只有整帧的所有数据包均发送完成，才进入“当前推送画面”。
+                    if stop_event.is_set():
+                        break
+                    preview_frame = self.make_stream_preview_frame(rgb, color_mode_code)
+                    self.publish_stream_preview(preview_frame, color_mode_str)
+
                     stats_frames += 1
                     now = time.perf_counter()
                     elapsed = now - stats_started
@@ -2260,6 +2392,7 @@ class YAMLConfigEditor:
             self.root.after(0, lambda: self.stop_button.config(state=tk.DISABLED))
             self.root.after(0, lambda: self.start_button.config(state=tk.NORMAL))
             self.root.after(0, lambda: self.status_var.set("推流出错"))
+            self.root.after(0, lambda: self.clear_stream_preview("推流出错"))
 
     def on_closing(self):
         """窗口关闭时的处理"""
@@ -2275,6 +2408,12 @@ class YAMLConfigEditor:
             except tk.TclError:
                 pass
             self.video_idle_playback_job = None
+        if self.stream_preview_job is not None:
+            try:
+                self.root.after_cancel(self.stream_preview_job)
+            except tk.TclError:
+                pass
+            self.stream_preview_job = None
         if self.streaming:
             self.stop_streaming()
             # 等待一小段时间让线程结束
