@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog, simpledialog
+from tkinter import ttk, messagebox, simpledialog
 import yaml
 import os
 import re
@@ -40,9 +40,9 @@ class YAMLConfigEditor:
         print("配置文件路径在_internal/config_stream.yaml, 首次使用请查看README.md")
         print("==================================================================================================================")
         self.root = root
-        self.root.title("YAML 配置文件编辑器V0.0.5")
-        self.root.geometry("760x850")
-        self.root.minsize(720, 760)
+        self.root.title("ESP32 UDP 屏幕推流")
+        self.root.geometry("880x880")
+        self.root.minsize(760, 720)
 
         # UDP推流相关
         self.streaming = False
@@ -57,58 +57,58 @@ class YAMLConfigEditor:
         # 默认配置文件
         self.config_file = "config.yaml"
 
-        # 创建默认配置
-        self.default_config = {
-            'server_ip': "192.168.100.161",
-            'server_port': 8888,
-            'resolution': [240, 240],
-            'color_mode': "rgb332",
-            'lines_per_packet': 6,
-            'udp_interval': 0.001
-        }
-
         # 预设配置 - 根据Header常量修正颜色模式值
         self.presets = {
-            "预设1: 高清全彩": {
+            "预设1：240 高清色彩": {
                 'resolution': 240,  # ESP32UDPHeader.RES_240 = 0
                 'color_mode': 0,  # ESP32UDPHeader.COLOR_RGB565 = 0
                 'lines_per_packet': 3,
                 'udp_interval': 0.00075
             },
-            "预设2: 高清低彩": {
+            "预设2：240 节省带宽": {
                 'resolution': 240,  # ESP32UDPHeader.RES_240 = 0
                 'color_mode': 1,  # ESP32UDPHeader.COLOR_RGB332 = 1
                 'lines_per_packet': 6,
                 'udp_interval': 0.001
             },
-            "预设3: 中清高彩": {
+            "预设3：180 高清色彩": {
                 'resolution': 180,  # ESP32UDPHeader.RES_180 = 1
                 'color_mode': 0,  # ESP32UDPHeader.COLOR_RGB565 = 0
                 'lines_per_packet': 4,
                 'udp_interval': 0.001
             },
-            "预设4: 中清低彩": {
+            "预设4：180 节省带宽": {
                 'resolution': 180,  # ESP32UDPHeader.RES_180 = 1
                 'color_mode': 1,  # ESP32UDPHeader.COLOR_RGB332 = 1
-                # 'lines_per_packet': 8,
-                # 'udp_interval': 0.001
                 'lines_per_packet': 6,
                 'udp_interval': 0.001
             },
-            "预设5: 低清高彩": {
+            "预设5：120 高清色彩": {
                 'resolution': 120,  # ESP32UDPHeader.RES_120 = 2
                 'color_mode': 0,  # ESP32UDPHeader.COLOR_RGB565 = 0
-                # 'lines_per_packet': 6,
-                # 'udp_interval': 0.000945
                 'lines_per_packet': 4,
                 'udp_interval': 0.001
             },
-            "预设6: 低清低彩": {  # 新增预设6
+            "预设6：120 节省带宽": {
                 'resolution': 120,  # ESP32UDPHeader.RES_120 = 2
                 'color_mode': 1,  # ESP32UDPHeader.COLOR_RGB332 = 1
                 'lines_per_packet': 4,
                 'udp_interval': 0.001
             }
+        }
+        self.default_preset_name = "预设5：120 高清色彩"
+        self.custom_preset_label = "自定义配置"
+
+        # 首次启动没有 config.yaml 时使用预设5的发送参数。
+        default_preset = self.presets[self.default_preset_name]
+        self.default_config = {
+            'server_ip': "192.168.100.161",
+            'server_port': 8888,
+            'resolution': [default_preset['resolution'], default_preset['resolution']],
+            'color_mode': "rgb565" if default_preset['color_mode'] == 0 else "rgb332",
+            'lines_per_packet': default_preset['lines_per_packet'],
+            'udp_interval': default_preset['udp_interval'],
+            'preset': self.default_preset_name,
         }
 
         # 可选值定义（存储为字符串列表，用于显示）
@@ -124,7 +124,9 @@ class YAMLConfigEditor:
         }
 
         # 预设变量
-        self.preset_var = tk.StringVar(value="")
+        self.preset_var = tk.StringVar(value=self.default_preset_name)
+        self.preset_summary_var = tk.StringVar(value="")
+        self.updating_udp_controls = False
 
         # 图像源选择
         self.source_var = tk.StringVar(value="")
@@ -170,92 +172,148 @@ class YAMLConfigEditor:
         # 创建主框架
         main_frame = ttk.Frame(self.root, padding="10")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        main_frame.columnconfigure(0, weight=1)
+        main_frame.rowconfigure(0, weight=1)
 
-        # 文件选择部分
-        file_frame = ttk.LabelFrame(main_frame, text="文件操作", padding="5")
-        file_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        # 两层配置分别放到页签中，避免发送参数和图像源参数混在一起。
+        config_notebook = ttk.Notebook(main_frame)
+        config_notebook.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
 
-        ttk.Button(file_frame, text="选择文件", command=self.select_file).grid(row=0, column=0, padx=5)
-        ttk.Button(file_frame, text="新建文件", command=self.create_new_file).grid(row=0, column=1, padx=5)
+        udp_tab = ttk.Frame(config_notebook, padding=12)
+        source_tab = ttk.Frame(config_notebook, padding=12)
+        config_notebook.add(udp_tab, text="  1  UDP 发送配置  ")
+        config_notebook.add(source_tab, text="  2  图像源配置  ")
+        udp_tab.columnconfigure(0, weight=1)
+        source_tab.columnconfigure(0, weight=1)
+        source_tab.rowconfigure(0, weight=1)
 
-        self.file_label = ttk.Label(file_frame, text=f"当前文件: {self.config_file}")
-        self.file_label.grid(row=0, column=2, padx=20)
+        source_canvas = tk.Canvas(source_tab, highlightthickness=0, height=500)
+        source_scrollbar = ttk.Scrollbar(source_tab, orient=tk.VERTICAL, command=source_canvas.yview)
+        source_canvas.configure(yscrollcommand=source_scrollbar.set)
+        source_canvas.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        source_scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
+        source_content = ttk.Frame(source_canvas)
+        source_content.columnconfigure(0, weight=1)
+        source_window = source_canvas.create_window((0, 0), window=source_content, anchor=tk.NW)
+        source_content.bind(
+            "<Configure>",
+            lambda event: source_canvas.configure(scrollregion=source_canvas.bbox("all")),
+        )
+        source_canvas.bind(
+            "<Configure>",
+            lambda event: source_canvas.itemconfigure(source_window, width=event.width),
+        )
 
-        # 预设配置框架 - 增加高度以容纳6个预设
-        preset_frame = ttk.LabelFrame(main_frame, text="预设配置 (点击选择)", padding="5")
-        preset_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        def scroll_source(event):
+            source_canvas.yview_scroll(-int(event.delta / 120), "units")
 
-        # 创建预设单选按钮 - 调整为每行3个，共6个预设
-        row = 0
-        col = 0
-        preset_names = list(self.presets.keys())
+        source_canvas.bind("<Enter>", lambda event: source_canvas.bind_all("<MouseWheel>", scroll_source))
+        source_canvas.bind("<Leave>", lambda event: source_canvas.unbind_all("<MouseWheel>"))
 
-        for i, preset_name in enumerate(preset_names):
-            rb = ttk.Radiobutton(
-                preset_frame,
-                text=preset_name,
-                variable=self.preset_var,
-                value=preset_name,
-                command=lambda name=preset_name: self.apply_preset(name)
-            )
-            rb.grid(row=row, column=col, sticky=tk.W, padx=5, pady=2)
-            col += 1
-            if col >= 3:  # 每行3个
-                col = 0
-                row += 1
+        ttk.Label(
+            udp_tab,
+            text="先选择适合接收端和网络的发送预设，再填写 ESP32 的地址。",
+            foreground="#555555",
+        ).grid(row=0, column=0, sticky=tk.W, pady=(0, 8))
 
-        # 配置项框架
-        config_frame = ttk.LabelFrame(main_frame, text="配置参数", padding="10")
-        config_frame.grid(row=2, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
+        preset_frame = ttk.LabelFrame(udp_tab, text="发送预设", padding=10)
+        preset_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+        preset_frame.columnconfigure(1, weight=1)
+        ttk.Label(preset_frame, text="分辨率预设:").grid(row=0, column=0, sticky=tk.W)
+        self.preset_combo = ttk.Combobox(
+            preset_frame,
+            textvariable=self.preset_var,
+            values=list(self.presets),
+            state="readonly",
+            width=30,
+        )
+        self.preset_combo.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(8, 0))
+        self.preset_combo.bind("<<ComboboxSelected>>", self.on_udp_preset_selected)
+        ttk.Label(
+            preset_frame,
+            textvariable=self.preset_summary_var,
+            foreground="#356a8a",
+        ).grid(row=1, column=1, sticky=tk.W, pady=(5, 0))
+
+        destination_frame = ttk.LabelFrame(udp_tab, text="接收端", padding=10)
+        destination_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+        destination_frame.columnconfigure(1, weight=1)
+        destination_frame.columnconfigure(3, weight=1)
 
         # 创建配置项输入框
         self.entries = {}
-        row = 0
+        ttk.Label(destination_frame, text="ESP32 IP:").grid(row=0, column=0, sticky=tk.W)
+        self.entries['server_ip'] = ttk.Entry(destination_frame, width=24)
+        self.entries['server_ip'].grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(8, 20))
+        ttk.Label(destination_frame, text="UDP 端口:").grid(row=0, column=2, sticky=tk.W)
+        self.entries['server_port'] = ttk.Entry(destination_frame, width=12)
+        self.entries['server_port'].grid(row=0, column=3, sticky=(tk.W, tk.E), padx=(8, 0))
 
-        # server_ip
-        ttk.Label(config_frame, text="服务器IP:").grid(row=row, column=0, sticky=tk.W, pady=2)
-        self.entries['server_ip'] = ttk.Entry(config_frame, width=30)
-        self.entries['server_ip'].grid(row=row, column=1, sticky=(tk.W, tk.E), pady=2)
-        row += 1
+        transport_frame = ttk.LabelFrame(udp_tab, text="传输参数", padding=10)
+        transport_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+        transport_frame.columnconfigure(1, weight=1)
+        transport_frame.columnconfigure(3, weight=1)
 
-        # server_port
-        ttk.Label(config_frame, text="服务器端口:").grid(row=row, column=0, sticky=tk.W, pady=2)
-        self.entries['server_port'] = ttk.Entry(config_frame, width=30)
-        self.entries['server_port'].grid(row=row, column=1, sticky=(tk.W, tk.E), pady=2)
-        row += 1
+        ttk.Label(transport_frame, text="输出分辨率:").grid(row=0, column=0, sticky=tk.W, pady=3)
+        self.entries['resolution'] = ttk.Combobox(
+            transport_frame,
+            values=self.valid_resolution_strings,
+            width=13,
+            state="readonly",
+        )
+        self.entries['resolution'].grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(8, 20), pady=3)
+        ttk.Label(transport_frame, text="色彩模式:").grid(row=0, column=2, sticky=tk.W, pady=3)
+        self.entries['color_mode'] = ttk.Combobox(
+            transport_frame,
+            values=self.valid_values['color_mode'],
+            width=13,
+            state="readonly",
+        )
+        self.entries['color_mode'].grid(row=0, column=3, sticky=(tk.W, tk.E), padx=(8, 0), pady=3)
 
-        # resolution
-        ttk.Label(config_frame, text="分辨率:").grid(row=row, column=0, sticky=tk.W, pady=2)
-        self.entries['resolution'] = ttk.Combobox(config_frame,
-                                                  values=self.valid_resolution_strings,
-                                                  width=27, state="readonly")
-        self.entries['resolution'].grid(row=row, column=1, sticky=(tk.W, tk.E), pady=2)
-        row += 1
+        ttk.Label(transport_frame, text="每包行数:").grid(row=1, column=0, sticky=tk.W, pady=3)
+        self.entries['lines_per_packet'] = ttk.Spinbox(
+            transport_frame,
+            from_=1,
+            to=8,
+            width=13,
+            command=self.on_udp_parameter_edited,
+        )
+        self.entries['lines_per_packet'].grid(row=1, column=1, sticky=(tk.W, tk.E), padx=(8, 20), pady=3)
+        ttk.Label(transport_frame, text="发包间隔 (秒):").grid(row=1, column=2, sticky=tk.W, pady=3)
+        self.entries['udp_interval'] = ttk.Entry(transport_frame, width=13)
+        self.entries['udp_interval'].grid(row=1, column=3, sticky=(tk.W, tk.E), padx=(8, 0), pady=3)
+        ttk.Label(
+            transport_frame,
+            text="高级参数会随预设自动填写；手动修改后将显示为“自定义配置”。",
+            foreground="#777777",
+        ).grid(row=2, column=0, columnspan=4, sticky=tk.W, pady=(6, 0))
 
-        # color_mode
-        ttk.Label(config_frame, text="色彩模式:").grid(row=row, column=0, sticky=tk.W, pady=2)
-        self.entries['color_mode'] = ttk.Combobox(config_frame,
-                                                  values=self.valid_values['color_mode'],
-                                                  width=27, state="readonly")
-        self.entries['color_mode'].grid(row=row, column=1, sticky=(tk.W, tk.E), pady=2)
-        row += 1
+        for key in ('resolution', 'color_mode'):
+            self.entries[key].bind("<<ComboboxSelected>>", self.on_udp_parameter_edited)
+        for key in ('lines_per_packet', 'udp_interval'):
+            self.entries[key].bind("<KeyRelease>", self.on_udp_parameter_edited)
 
-        # lines_per_packet - 修正为1-8范围
-        ttk.Label(config_frame, text="每包行数:").grid(row=row, column=0, sticky=tk.W, pady=2)
-        self.entries['lines_per_packet'] = ttk.Spinbox(config_frame, from_=1, to=15, width=27)
-        self.entries['lines_per_packet'].grid(row=row, column=1, sticky=(tk.W, tk.E), pady=2)
-        row += 1
+        udp_action_frame = ttk.Frame(udp_tab)
+        udp_action_frame.grid(row=4, column=0, sticky=(tk.W, tk.E))
+        ttk.Button(udp_action_frame, text="保存 UDP 配置", command=self.save_config).pack(side=tk.LEFT)
+        ttk.Button(udp_action_frame, text="恢复预设5", command=self.reset_to_default).pack(side=tk.LEFT, padx=8)
+        ttk.Button(udp_action_frame, text="查看 YAML", command=self.show_yaml).pack(side=tk.LEFT)
+        ttk.Label(
+            udp_action_frame,
+            text=f"自动读取/保存：{self.config_file}",
+            foreground="#777777",
+        ).pack(side=tk.RIGHT)
 
-        # udp_interval
-        ttk.Label(config_frame, text="UDP发送间隔:").grid(row=row, column=0, sticky=tk.W, pady=2)
-        self.entries['udp_interval'] = ttk.Entry(config_frame, width=30)
-        self.entries['udp_interval'].grid(row=row, column=1, sticky=(tk.W, tk.E), pady=2)
-        ttk.Label(config_frame, text="(0.0001-0.1)").grid(row=row, column=2, sticky=tk.W, padx=5, pady=2)
-        row += 1
+        ttk.Label(
+            source_content,
+            text="选择画面来源；不同来源的专属参数会显示在下方。",
+            foreground="#555555",
+        ).grid(row=0, column=0, sticky=tk.W, pady=(0, 8))
 
         # 图像源切换
-        source_frame = ttk.LabelFrame(main_frame, text="图像源", padding="5")
-        source_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        source_frame = ttk.LabelFrame(source_content, text="图像源", padding=10)
+        source_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         source_frame.columnconfigure(1, weight=1)
 
         ttk.Label(source_frame, text="当前源:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
@@ -342,9 +400,23 @@ class YAMLConfigEditor:
             variable=self.audio_selected_effect_enabled_var,
             command=self.on_audio_effect_enabled_changed,
         ).grid(row=0, column=2, padx=(0, 8))
-        ttk.Button(effect_toolbar, text="仅用当前", command=self.enable_only_current_audio_effect).grid(row=0, column=3, padx=2)
-        ttk.Button(effect_toolbar, text="重置参数", command=self.reset_current_audio_effect).grid(row=0, column=4, padx=2)
-        ttk.Button(effect_toolbar, text="全部关闭", command=self.disable_all_audio_effects).grid(row=0, column=5, padx=(2, 0))
+        effect_button_frame = ttk.Frame(effect_toolbar)
+        effect_button_frame.grid(row=1, column=1, columnspan=2, sticky=tk.W, pady=(6, 0))
+        ttk.Button(
+            effect_button_frame,
+            text="仅用当前",
+            command=self.enable_only_current_audio_effect,
+        ).pack(side=tk.LEFT)
+        ttk.Button(
+            effect_button_frame,
+            text="重置参数",
+            command=self.reset_current_audio_effect,
+        ).pack(side=tk.LEFT, padx=6)
+        ttk.Button(
+            effect_button_frame,
+            text="全部关闭",
+            command=self.disable_all_audio_effects,
+        ).pack(side=tk.LEFT)
 
         ttk.Label(
             self.audio_controls_frame,
@@ -406,62 +478,54 @@ class YAMLConfigEditor:
             width=24,
         )
         self.audio_preset_combo.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(6, 8))
+        audio_preset_buttons = ttk.Frame(audio_preset_frame)
+        audio_preset_buttons.grid(row=1, column=1, sticky=tk.W, pady=(6, 0))
         ttk.Button(
-            audio_preset_frame,
+            audio_preset_buttons,
             text="应用",
             command=self.apply_audio_preset,
-        ).grid(row=0, column=2, padx=2)
+        ).pack(side=tk.LEFT)
         ttk.Button(
-            audio_preset_frame,
+            audio_preset_buttons,
             text="保存当前组合",
             command=self.save_current_audio_preset,
-        ).grid(row=0, column=3, padx=2)
+        ).pack(side=tk.LEFT, padx=6)
         ttk.Button(
-            audio_preset_frame,
+            audio_preset_buttons,
             text="删除",
             command=self.delete_selected_audio_preset,
-        ).grid(row=0, column=4, padx=(2, 0))
+        ).pack(side=tk.LEFT)
 
         self.audio_controls_frame.grid_remove()
 
-        # 按钮框架
-        button_frame = ttk.Frame(main_frame)
-        button_frame.grid(row=4, column=0, columnspan=2, pady=10)
-
-        ttk.Button(button_frame, text="保存配置", command=self.save_config).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="重置为默认", command=self.reset_to_default).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="查看YAML", command=self.show_yaml).pack(side=tk.LEFT, padx=5)
-
-        # 推流控制按钮
-        stream_frame = ttk.Frame(main_frame)
-        stream_frame.grid(row=5, column=0, columnspan=2, pady=10)
+        # 推流控制独立于两层配置，切换页签后仍然可见。
+        stream_frame = ttk.LabelFrame(main_frame, text="推流控制", padding=8)
+        stream_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(10, 0))
 
         self.start_button = ttk.Button(stream_frame, text="开始推流",
                                        command=self.start_streaming,
                                        state=tk.NORMAL if UDP_MODULES_AVAILABLE else tk.DISABLED)
-        self.start_button.pack(side=tk.LEFT, padx=5)
+        self.start_button.pack(side=tk.LEFT)
 
         self.stop_button = ttk.Button(stream_frame, text="停止推流",
                                       command=self.stop_streaming,
                                       state=tk.DISABLED)
-        self.stop_button.pack(side=tk.LEFT, padx=5)
+        self.stop_button.pack(side=tk.LEFT, padx=8)
 
         # 添加日志显示区域
         log_frame = ttk.LabelFrame(main_frame, text="日志", padding="5")
-        log_frame.grid(row=6, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(10, 0))
+        log_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(10, 0))
 
-        self.log_text = scrolledtext.ScrolledText(log_frame, height=8, width=70)
+        self.log_text = scrolledtext.ScrolledText(log_frame, height=4, width=58)
         self.log_text.pack(expand=True, fill=tk.BOTH)
         self.log_text.config(state=tk.DISABLED)
 
         # 状态栏
         self.status_var = tk.StringVar(value="就绪")
         status_bar = ttk.Label(main_frame, textvariable=self.status_var, relief=tk.SUNKEN)
-        status_bar.grid(row=7, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
+        status_bar.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=(10, 0))
 
         # 配置网格权重
-        main_frame.columnconfigure(0, weight=1)
-        config_frame.columnconfigure(1, weight=1)
         log_frame.columnconfigure(0, weight=1)
         log_frame.rowconfigure(0, weight=1)
 
@@ -1032,93 +1096,146 @@ class YAMLConfigEditor:
         self.log_text.config(state=tk.DISABLED)
         self.root.update_idletasks()  # 立即更新界面
 
-    def select_file(self):
-        """选择YAML文件"""
-        file_path = filedialog.askopenfilename(
-            title="选择配置文件",
-            filetypes=[("YAML文件", "*.yaml *.yml"), ("所有文件", "*.*")]
+    def on_udp_preset_selected(self, event=None):
+        """下拉框选择后立即应用预设。"""
+        self.apply_preset(self.preset_var.get(), restart_if_streaming=True)
+
+    def update_preset_summary(self, preset_name):
+        preset = self.presets.get(preset_name)
+        if preset is None:
+            self.preset_summary_var.set("当前参数不属于内置预设")
+            return
+        color = "RGB565 高清色彩" if preset['color_mode'] == 0 else "RGB332 节省带宽"
+        interval_ms = preset['udp_interval'] * 1000
+        self.preset_summary_var.set(
+            f"{preset['resolution']} × {preset['resolution']} · {color} · "
+            f"每包 {preset['lines_per_packet']} 行 · {interval_ms:g} ms"
         )
-        if file_path:
-            self.config_file = file_path
-            self.file_label.config(text=f"当前文件: {os.path.basename(file_path)}")
-            self.load_config()
 
-    def create_new_file(self):
-        """创建新的配置文件"""
-        file_path = filedialog.asksaveasfilename(
-            title="创建新配置文件",
-            defaultextension=".yaml",
-            filetypes=[("YAML文件", "*.yaml"), ("所有文件", "*.*")]
-        )
-        if file_path:
-            self.config_file = file_path
-            self.file_label.config(text=f"当前文件: {os.path.basename(file_path)}")
-            self.reset_to_default()
-            self.save_config()
+    def get_matching_preset(self, config):
+        """返回与发送参数完全匹配的内置预设。"""
+        resolution = config.get('resolution')
+        if not isinstance(resolution, (list, tuple)) or len(resolution) != 2:
+            return None
+        try:
+            lines = int(config.get('lines_per_packet'))
+            interval = float(config.get('udp_interval'))
+        except (TypeError, ValueError):
+            return None
 
-    def apply_preset(self, preset_name):
-        """应用预设配置"""
-        if preset_name in self.presets:
-            preset = self.presets[preset_name]
+        for name, preset in self.presets.items():
+            color = "rgb565" if preset['color_mode'] == 0 else "rgb332"
+            if (
+                list(resolution) == [preset['resolution'], preset['resolution']]
+                and config.get('color_mode') == color
+                and lines == preset['lines_per_packet']
+                and abs(interval - preset['udp_interval']) < 1e-12
+            ):
+                return name
+        return None
 
-            # 应用预设值
+    def get_udp_form_config(self):
+        """读取当前 UDP 表单；输入不完整时由调用者处理异常。"""
+        return {
+            'server_ip': self.entries['server_ip'].get(),
+            'server_port': int(self.entries['server_port'].get()),
+            'resolution': self.parse_resolution_string(self.entries['resolution'].get()),
+            'color_mode': self.entries['color_mode'].get(),
+            'lines_per_packet': int(self.entries['lines_per_packet'].get()),
+            'udp_interval': float(self.entries['udp_interval'].get()),
+        }
+
+    def on_udp_parameter_edited(self, event=None):
+        """手动修改传输参数后同步预设下拉框状态。"""
+        if self.updating_udp_controls:
+            return
+        try:
+            preset_name = self.get_matching_preset(self.get_udp_form_config())
+        except (TypeError, ValueError):
+            preset_name = None
+        self.preset_var.set(preset_name or self.custom_preset_label)
+        self.update_preset_summary(preset_name)
+
+    def apply_preset(self, preset_name, restart_if_streaming=False):
+        """应用预设；仅在原本正在推流时重启发送线程。"""
+        preset = self.presets.get(preset_name)
+        if preset is None:
+            return
+
+        was_streaming = self.streaming
+        self.updating_udp_controls = True
+        try:
             resolution_val = preset['resolution']
-            resolution_str = f"[{resolution_val},{resolution_val}]"
-            self.entries['resolution'].set(resolution_str)
-
-            color_mode_val = preset['color_mode']
-            # 根据Header常量，0=rgb565, 1=rgb332
-            color_mode_str = "rgb565" if color_mode_val == 0 else "rgb332"
-            self.entries['color_mode'].set(color_mode_str)
+            self.entries['resolution'].set(f"[{resolution_val},{resolution_val}]")
+            self.entries['color_mode'].set("rgb565" if preset['color_mode'] == 0 else "rgb332")
 
             self.entries['lines_per_packet'].delete(0, tk.END)
             self.entries['lines_per_packet'].insert(0, str(preset['lines_per_packet']))
-
             self.entries['udp_interval'].delete(0, tk.END)
             self.entries['udp_interval'].insert(0, str(preset['udp_interval']))
+            self.preset_var.set(preset_name)
+            self.update_preset_summary(preset_name)
+        finally:
+            self.updating_udp_controls = False
 
-            self.log_message(f"已应用预设: {preset_name}")
-            self.status_var.set(f"已应用预设: {preset_name}")
-            self.stop_button.invoke()
-            time.sleep(0.1)
-            self.start_button.invoke()
-
+        self.log_message(f"已应用发送预设: {preset_name}")
+        self.status_var.set(f"已应用发送预设: {preset_name}")
+        if restart_if_streaming and was_streaming:
+            self.stop_streaming()
+            self.root.after(120, self.start_streaming)
 
     def load_config(self):
         """加载配置文件"""
         try:
-            if os.path.exists(self.config_file):
+            config_exists = os.path.exists(self.config_file)
+            using_default_config = not config_exists
+            if config_exists:
                 with open(self.config_file, 'r', encoding='utf-8') as f:
                     config = yaml.safe_load(f)
+                if config is None:
+                    config = self.default_config.copy()
+                    using_default_config = True
+                elif not isinstance(config, dict):
+                    raise ValueError("配置内容必须是 YAML 对象")
             else:
                 config = self.default_config.copy()
-                self.status_var.set(f"文件不存在，已加载默认配置")
-                self.log_message(f"文件不存在，已加载默认配置")
+            if using_default_config:
+                self.log_message("未找到有效的 UDP 配置，已选择预设5：120 高清色彩")
 
             # 填充表单
-            self.entries['server_ip'].delete(0, tk.END)
-            self.entries['server_ip'].insert(0, config.get('server_ip', ''))
+            self.updating_udp_controls = True
+            try:
+                self.entries['server_ip'].delete(0, tk.END)
+                self.entries['server_ip'].insert(0, config.get('server_ip', self.default_config['server_ip']))
+                self.entries['server_port'].delete(0, tk.END)
+                self.entries['server_port'].insert(0, str(config.get('server_port', self.default_config['server_port'])))
 
-            self.entries['server_port'].delete(0, tk.END)
-            self.entries['server_port'].insert(0, str(config.get('server_port', '')))
+                resolution = config.get('resolution', self.default_config['resolution'])
+                self.entries['resolution'].set(f"[{resolution[0]},{resolution[1]}]")
+                self.entries['color_mode'].set(config.get('color_mode', self.default_config['color_mode']))
+                self.entries['lines_per_packet'].delete(0, tk.END)
+                self.entries['lines_per_packet'].insert(
+                    0, str(config.get('lines_per_packet', self.default_config['lines_per_packet']))
+                )
+                self.entries['udp_interval'].delete(0, tk.END)
+                self.entries['udp_interval'].insert(
+                    0, str(config.get('udp_interval', self.default_config['udp_interval']))
+                )
+            finally:
+                self.updating_udp_controls = False
 
-            resolution = config.get('resolution', [240, 240])
-            resolution_str = f"[{resolution[0]},{resolution[1]}]"
-            self.entries['resolution'].set(resolution_str)
+            preset_name = self.get_matching_preset(self.get_udp_form_config())
+            if using_default_config and preset_name is None:
+                preset_name = self.default_preset_name
+                self.apply_preset(preset_name)
+            self.preset_var.set(preset_name or self.custom_preset_label)
+            self.update_preset_summary(preset_name)
 
-            self.entries['color_mode'].set(config.get('color_mode', 'rgb332'))
-
-            self.entries['lines_per_packet'].delete(0, tk.END)
-            self.entries['lines_per_packet'].insert(0, str(config.get('lines_per_packet', 3)))
-
-            self.entries['udp_interval'].delete(0, tk.END)
-            self.entries['udp_interval'].insert(0, str(config.get('udp_interval', 0.0002)))
-
-            # 重置预设选择
-            self.preset_var.set("")
-
-            self.log_message(f"已加载配置文件: {self.config_file}")
-            self.status_var.set(f"已加载配置文件: {self.config_file}")
+            if not using_default_config:
+                self.log_message(f"已自动加载 UDP 配置: {self.config_file}")
+                self.status_var.set(f"已加载 UDP 配置: {self.config_file}")
+            else:
+                self.status_var.set(f"首次启动默认使用 {self.default_preset_name}")
 
         except Exception as e:
             messagebox.showerror("错误", f"加载配置文件失败: {str(e)}")
@@ -1212,34 +1329,25 @@ class YAMLConfigEditor:
             return ESP32UDPHeader.COLOR_RGB332  # 1
 
     def save_config(self):
-        """保存配置文件"""
+        """保存固定位置的 UDP 配置文件。"""
         errors = self.validate_inputs()
         if errors:
             messagebox.showerror("输入错误", "\n".join(errors))
             return
 
         try:
-            # 构建配置字典
-            config = {}
-
-            config['server_ip'] = self.entries['server_ip'].get()
-            config['server_port'] = int(self.entries['server_port'].get())
-
-            # 解析resolution字符串为列表
-            res_text = self.entries['resolution'].get()
-            config['resolution'] = self.parse_resolution_string(res_text)
-
-            config['color_mode'] = self.entries['color_mode'].get()
-            config['lines_per_packet'] = int(self.entries['lines_per_packet'].get())
-            config['udp_interval'] = float(self.entries['udp_interval'].get())
+            config = self.get_udp_form_config()
+            preset_name = self.get_matching_preset(config)
+            if preset_name:
+                config['preset'] = preset_name
 
             # 保存到文件
             with open(self.config_file, 'w', encoding='utf-8') as f:
-                yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
+                yaml.safe_dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
-            self.log_message(f"配置文件已保存: {self.config_file}")
-            self.status_var.set(f"配置文件已保存: {self.config_file}")
-            messagebox.showinfo("成功", "配置文件保存成功！")
+            self.log_message(f"UDP 配置已保存: {self.config_file}")
+            self.status_var.set(f"UDP 配置已保存: {self.config_file}")
+            messagebox.showinfo("成功", "UDP 发送配置已保存")
 
         except Exception as e:
             messagebox.showerror("错误", f"保存配置文件失败: {str(e)}")
@@ -1247,40 +1355,24 @@ class YAMLConfigEditor:
             self.status_var.set("保存配置文件失败")
 
     def reset_to_default(self):
-        """重置为默认值"""
-        for key, value in self.default_config.items():
-            if key in self.entries:
-                if key == 'resolution':
-                    self.entries[key].set(f"[{value[0]},{value[1]}]")
-                elif key == 'color_mode':
-                    self.entries[key].set(value)
-                else:
-                    self.entries[key].delete(0, tk.END)
-                    self.entries[key].insert(0, str(value))
-
-        # 重置预设选择
-        self.preset_var.set("")
-
-        self.log_message("已重置为默认值")
-        self.status_var.set("已重置为默认值")
+        """恢复预设5，同时保留用户已填写的 ESP32 地址。"""
+        self.apply_preset(self.default_preset_name, restart_if_streaming=True)
 
     def show_yaml(self):
         """显示当前配置的YAML格式"""
         try:
-            # 构建配置字典
-            config = {}
-            config['server_ip'] = self.entries['server_ip'].get()
-            config['server_port'] = int(self.entries['server_port'].get())
-
-            res_text = self.entries['resolution'].get()
-            config['resolution'] = self.parse_resolution_string(res_text)
-
-            config['color_mode'] = self.entries['color_mode'].get()
-            config['lines_per_packet'] = int(self.entries['lines_per_packet'].get())
-            config['udp_interval'] = float(self.entries['udp_interval'].get())
+            config = self.get_udp_form_config()
+            preset_name = self.get_matching_preset(config)
+            if preset_name:
+                config['preset'] = preset_name
 
             # 生成YAML字符串
-            yaml_str = yaml.dump(config, default_flow_style=False, allow_unicode=True)
+            yaml_str = yaml.safe_dump(
+                config,
+                default_flow_style=False,
+                allow_unicode=True,
+                sort_keys=False,
+            )
 
             # 显示在弹窗中
             popup = tk.Toplevel(self.root)
