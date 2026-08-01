@@ -1,370 +1,353 @@
-# ESP32UDPScreenShareClient
+# ESP32 UDP Screen Share Client
 
-## ESP32 专用屏幕共享推流工具
-- 视频演示: https://www.bilibili.com/video/BV16R6ABCEVN
-- ESP32串流固件：
-  - 屏幕共享纯享版固件【推荐,更稳定流畅】：https://github.com/tignioj/ESP32UDPScreenShare/releases/tag/v0.0.2
-  - AIO固件【目前bug有点多，暂时不推荐，但也能用】，https://github.com/tignioj/HoloCubic_AIO/releases/tag/v2.13.8
+一个面向 ESP32 屏幕接收端的 Windows 桌面推流工具。程序可以采集屏幕、窗口、本地视频、摄像头、RTSP 流或系统音频可视化画面，并通过 UDP 将图像发送给 ESP32。
 
-![main](main.png)
-![demo](demo.jpg)
-## 使用手册
-###  一、配置推流图像源`config_stream.yaml`
+- 演示视频：[Bilibili](https://www.bilibili.com/video/BV16R6ABCEVN)
+- 推荐接收端固件：https://github.com/tignioj/ESP32UDPScreenShare/releases
 
-本程序用途：
-用于给holocubic ESP32发送“视频流“，视频流的来源可以是屏幕截图
+![程序主界面](main.png)
 
-必须要有视频流才能发送，如何配置视频流？
+## 功能特性
 
-找到`_internal/config_stream.yaml`文件，里面有多个示例，每一个source都是一个“视频流”配置。
+- 支持 `240 × 240`、`180 × 180`、`120 × 120` 三种输出分辨率
+- 支持 RGB332 和 RGB565 色彩格式
+- 支持全屏、指定区域和指定窗口截图
+- 支持本地视频、摄像头及 RTSP 图像源
+- 支持音频频谱、波形、粒子等多种可叠加的可视化效果
+- 推流过程中可实时切换图像源、调整截图区域和音频效果
+- 支持保存 UDP 参数、音频参数及音频效果组合预设
 
-程序启动后，主界面的“图像源”下拉框会列出所有已启用且初始化成功的 source。选择一项即可立即切换，推流过程中也可以切换，无需停止后重新启动。
+## 运行环境
 
-## 配置说明
-- type 可选值：`screen|video_file|audio_visualization|rtsp|camera`
-- screen 表示截图视频源
-- video_file 表示本地视频
-- audio_visualization 音频可视化。需要电脑安装[VBCable](https://vb-audio.com/Cable/)
-- rtsp仅做了简单的适配，需要注意如果rtsp连接不上，就设置enable为false否则程序打不开，camera没做。
-- camera相机,没做。
+| 项目 | 要求 |
+| --- | --- |
+| 操作系统 | Windows 10/11（当前主要测试平台） |
+| Python | 3.10 或更高版本 |
+| 包管理器 | 推荐使用 [uv](https://docs.astral.sh/uv/) |
+| 网络 | 电脑与 ESP32 位于同一局域网，且 UDP 通信未被防火墙拦截 |
+| 接收端 | 已刷入兼容的 ESP32 UDP 屏幕接收固件 |
 
-## 类型一：屏幕源: type:screen
-表示来源于屏幕截图
--	id:自定义一个名称，
--	enable: 如果配置了源但是不想开启，可以设置enable为False
--	params:
-- display_idx: 不用管。
-  -	region: [left, top, width, height]，如果没有指定region，就会全屏截图
-  -	fps：没什么用，暂时没做。
-  -	use_mss: True|False。 兼容模式。按照标题截图有时候黑屏，就把这个use_mss设置为True
-  -	window_title：窗口名称。 表示截取指定符合标题的窗口，如果发现是黑屏，则开启兼容模
+音频可视化不是普通推流的必需条件；只有采集系统播放声音时才需要安装 VB-CABLE。
 
-## 类型二：本地视频： type:video_file
-表示来源于本地mp4文件， 注意，如果路径不存在，程序会闪退。
-```yaml
-streamer:
-  sources:
-    - type: "video_file" # 视频源类型
-      id: "video_player"  # 自定义的名称
-      params:
-        video_path: 'I:\genshin_video\character_show'
-        auto_play_next: True  # 是否自动循环播放全部视频
-        auto_crop_center: True # 是否自动裁边居中
-        random_play: True # 是否开启乱序循环播放
-#        first_play_video: 'xinhai.mp4'  # 指定第一个播放的视频
-        fps: 30
-```
-## 类型三：音频可视化: type:audio_visualization
-来源于系统音频输入并生成可视化图像
+## 快速开始
 
-### 一、安装[VBCable](https://vb-audio.com/Cable/)
-必须要安装该音频驱动，否则无法正常运行。
-### 二、设置系统声音输出为Cable-Input
-步骤：`系统->声音->选择播放声音的位置->CABLE Input`
-注意：有些音乐播放器在切换声卡输出的时候需要重启该播放器(例如Apple Music)，否则不生效。
-![cable_input.png](cable_input.png)
-经过这一步，你的电脑会没声音，因为声音都传输进这个"CABLE Input"去了，但是这个时候，你播放音乐，可以识别到频谱。
-### 三、恢复电脑声音
-系统->声音->更多声音设置->录制->CABLE Output>侦听->侦听此设备->通过此设备播放。
-选择你的扬声器设备即可。
-![audio_output_setting.png](audio_output_setting.png)
-经过这一步，你的电脑将恢复声音。
+### 1. 准备 ESP32
 
-### 四、在配置文件中添加源类型“音频可视化"
-找到 `config_stream.yaml`，添加一个源，指定 `type: audio_visualization`。输入分析参数放在 `input`，每个画面效果则在 `effects.<效果ID>` 下拥有自己的开关和 `params`，不会再与其他效果共用参数。
-```yaml
-    - type: "audio_visualization"
-      id: 'audio_visual1'
-      params:
-        input:
-          gain: 1.0
-          noise_gate: 0.0015
-          beat_sensitivity: 1.25
-        effects:
-          spectrum_bars:
-            enabled: true
-            params:
-              bars: 32
-              height: 0.72
-              smoothing: 0.76
-              gap: 2
-              glow: 0.72
-          particles:
-            enabled: true
-            params:
-              count: 120
-              spawn: 0.8
-              speed: 1.0
-              size: 3.2
-              drift: 0.65
+给 ESP32 刷入上方推荐的接收端固件，启动设备并记下它在局域网中的 IP 地址。接收端默认 UDP 端口通常为 `8888`。
+
+请先确认：
+
+- 电脑和 ESP32 连接到同一个路由器或局域网；
+- 路由器没有开启会隔离设备的“访客网络”或“客户端隔离”；
+- Windows 防火墙允许 Python 访问专用网络。
+
+### 2. 获取项目
+
+```powershell
+git clone https://github.com/tignioj/ESP32UDPScreenShareClient.git
+cd ESP32UDPScreenShareClient
 ```
 
-内置效果包括：丝带波形、玻璃频谱、轨道脉冲、棱镜光环、脉冲隧道、镜像城市、极光丝幕、星芒脉冲、流光瀑布和萤火粒子。完整参数示例见仓库中的 `config_stream.yaml`。
+如果已经下载了项目，直接在项目根目录打开 PowerShell 即可。后续命令必须在包含 `main_ui.py` 和 `config_stream.yaml` 的目录中执行。
 
-程序运行后，在“图像源”中选择音频可视化源，界面会展开“音频可视化工作台”。下拉框一次只编辑一个效果的专属参数，但多个效果仍可同时启用叠加；“仅用当前”“重置参数”和“全部关闭”均实时生效，不会重启推流。点击“保存参数”可将当前音频源的输入分析参数、效果开关和各效果参数写入 `config_stream.yaml`，下次启动时会自动恢复。
+### 3. 安装 uv 和项目依赖
 
-“效果组合预设”可以将当前完整组合命名保存，并支持保存多个预设、覆盖同名预设、应用和删除。预设按音频源分别存储在 `config_stream.yaml`；应用预设只实时切换当前效果，如需将它设为下次启动的默认组合，再点击“保存参数”。
+先按 [uv 官方文档](https://docs.astral.sh/uv/getting-started/installation/) 安装 uv，然后执行：
 
-每个效果的实现、参数定义和运行状态均位于 `capture/audio_visualization_source/effects/` 下的独立脚本。新增效果时创建新的效果类并在该目录的 `__init__.py` 注册即可，UI 会自动读取名称、说明和参数范围。
-
-最后，别忘了在配置文件底部选择激活，这里输入上面配置的id名称。
-```yaml
-  active_source: "audio_visual1"
-```
-
-## 类型四：网络视频： type:rtsp
-- id: "my_mobile_phone_rtsp_camera"
-- enable: false 注意rtsp源如果连接不上就设置为false否则程序无法启动
-- params:
-  - rtsp_url: "rtsp://admin:admin@192.168.30.134:8554/live"
-  - buffer_size: 5000
-  - timeout: 3  超过几秒没连上就断开rtsp
-
-
-## 指定源
-最后最重要的是指定`active_source: xxx`这里`xxx`要输入上面配置的任意一个源。例如这里设置的一个本地视频源，
-其id为"video_player"，那么在active_source中，写入`video_player`，那么程序启动的时候就会切换该源，如果初始化失败可能会导致程序无法开启或者闪退。
-例如加入这里的`video_path`如果不存在，程序就没法启动。另外，这里的`enable`字段必须要设置为`True`，否则无法使用该源
-```yaml
-streamer:
-  sources:
-    - type: "video_file" # 视频
-      id: "video_player"
-      enable: False
-      params:
-        video_path: 'I:\genshin_video\character_show'
-        auto_play_next: True  # 是否自动循环播放全部视频
-        random_play: True # 是否开启乱序循环播放
-#        first_play_video: 'xinhai.mp4'  # 指定第一个播放的视频
-        fps: 30
-  active_source: "window_fullscreen"
-```
-
-如何全屏截图：去掉region和window_title就可以截全屏
-
-目前只适配了Windows的屏幕共享和简单的rtsp
-
-配置示例:
-```yaml
-streamer:
-  sources:
-    - type: "demo" # 基础示例
-      id: 'demo1'
-
-    - type: "audio_visualization"
-      id: 'audio_visual1'
-      params:
-        input:
-          gain: 1.0
-          noise_gate: 0.0015
-          beat_sensitivity: 1.25
-        effects:
-          spectrum_bars:
-            enabled: true
-            params:
-              bars: 32
-              height: 0.72
-              smoothing: 0.76
-              gap: 2
-              glow: 0.72
-          particles:
-            enabled: true
-            params:
-              count: 120
-              spawn: 0.8
-              speed: 1.0
-              size: 3.2
-              drift: 0.65
-
-
-
-    - type: "video_file" # 本地视频文件
-      id: "video_player"
-      enable: True
-      params:
-#        video_path: 'I:\genshin_video\character_show'
-        video_path: 'sample_video'
-        auto_play_next: True # 是否自动循环播放全部视频
-        auto_crop_center: True # 是否自动裁边居中
-        random_play: True # 是否开启乱序循环播放
-#        first_play_video: 'xinhai.mp4'  # 指定第一个播放的视频
-        fps: 30
-    - type: "screen" # 区域截图
-      id: "window_region"
-      params:
-        display_idx: 0
-        fps: 30
-        region: [684, 330, 300, 300]
-        use_mss: False
-    - type: "screen"  # 全屏截图
-      id: "window_fullscreen"
-      params:
-        display_idx: 0
-        fps: 30
-        use_mss: False
-    - type: "screen"  # 按窗口截图
-      id: "yuanshen"
-      params:
-        window_title: '原神'
-        display_idx: 0
-        fps: 30
-        use_mss: False
-        remove_title_bar: True
-    - type: "screen"  # 按窗口截图（use_mss=True兼容模式)
-      id: "zzz"
-      params:
-        window_title: '绝区零'
-        display_idx: 0
-        fps: 30
-        use_mss: True
-
-    - type: "camera" # 相机
-      id: "webcam"
-      enable: false
-      params:
-        camera_idx: 0
-        resolution: [1280, 720]
-        fps: 25
-
-    - type: "rtsp" #rtsp
-      id: "my_mobile_phone_rtsp_camera"
-      enable: false
-      params:
-        rtsp_url: "rtsp://admin:admin@192.168.30.134:8554/live"
-        buffer_size: 5000
-        timeout: 3
-
-#  active_source: "yuanshen"
-  active_source: "audio_visual1"
-#  active_source: "window_region"
-  stream_url: "rtmp://server/live/stream"
-  bitrate: 2500000
-```
-
-
-### 二、启动`main_ui.py`
-先安装 [uv](https://docs.astral.sh/uv/)，然后在项目目录同步依赖：
 ```powershell
 uv sync
 ```
 
-启动程序：
+`uv sync` 会根据 `pyproject.toml` 和 `uv.lock` 创建虚拟环境并安装所需依赖。
+
+### 4. 首次运行前选择一个可靠的图像源
+
+程序启动时会读取根目录下的 `config_stream.yaml`，并初始化其中所有未设置 `enable: false` 的图像源。
+
+首次验证建议将文件底部的活动源改成内置测试画面，避免因为音频设备、窗口标题或视频路径无效而启动失败：
+
+```yaml
+streamer:
+  # sources 配置保持不变
+  active_source: demo1
+```
+
+### 5. 启动程序
+
 ```powershell
 uv run python main_ui.py
 ```
 
+窗口打开后：
 
-### 开发指南
-### 1.如何创造自己的source？
-在`capture/interface.py`找到一个想要的分类，或者自己再创造一个分类
-```text
-class SourceType(Enum):
-    """图像源类型"""
-    SCREEN = "screen"
-    CAMERA = "camera"
-    VIDEO_FILE = "video_file"
-    IMAGE_FILE = "image_file"
-    VIRTUAL = "virtual"  # 虚拟源，如测试图、合成图像
-    RTSP = "rtsp"  # 新增RTSP类型
-```
-例如这里我打算实现一个`VIDEO_FILE` 类型的Source，那么在capture下新建一个`video_Source/video_source.py`,
-新建一个类叫VideoPlayerSource,并且继承`capture.interface.ImageSourceInterface`,
-```python
-from capture.interface import ImageSourceInterface, SourceType
+1. 在“服务器 IP”中填写 ESP32 的局域网 IP，而不是电脑 IP；
+2. 将“服务器端口”保持为接收端使用的端口，推荐固件默认为 `8888`；
+3. 初次测试可选择“预设 2：高清低彩”，它使用 `240 × 240 + RGB332`，带宽压力较小；
+4. 在“图像源”中选择需要的来源并点击“切换”；
+5. 点击“开始推流”，观察日志中的帧率、包速率和错误信息；
+6. 需要结束时点击“停止推流”。
 
-class VideoPlayerSource(ImageSourceInterface):
-    def __init__(self, source_type: SourceType, source_id: str = ""):
-        super().__init__(source_type, source_id)
-        pass
+“保存配置”会把界面中的服务器地址和 UDP 参数保存到根目录的 `config.yaml`，下次启动会自动读取。
+
+### 不使用 uv
+
+也可以使用 Python 自带的虚拟环境。以下命令不需要激活虚拟环境：
+
+```powershell
+py -3.10 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install mss numpy opencv-python pywin32 pyyaml sounddevice
+.\.venv\Scripts\python.exe main_ui.py
 ```
 
-接下来实现接口的capture方法，返回一个numpy数组。剩余几个抽象方法直接先pass，但是initialize要返回True否则会加载失败
-这里capture生成一张彩虹图片
-```python
-from capture.interface import ImageSourceInterface, SourceType
-import numpy as np
-from typing import Optional, List, Dict, Any
-class VideoPlayerSource(ImageSourceInterface):
-  def __init__(self, source_type: SourceType, source_id: str = ""):
-    super().__init__(source_type, source_id)
+## 图像源配置
 
-  def capture(self) -> Optional[np.ndarray]:
-      height, width = 240, 240
-      image = np.zeros((height, width, 3), dtype=np.uint8)
-      # 将宽度分为7段，创建彩虹色
-      segment_width = width // 7
-      colors = [
-          [255, 0, 0],  # 红色
-          [255, 165, 0],  # 橙色
-          [255, 255, 0],  # 黄色
-          [0, 255, 0],  # 绿色
-          [0, 255, 255],  # 青色
-          [0, 0, 255],  # 蓝色
-          [128, 0, 128]  # 紫色
-      ]
-      for i in range(7):
-          start_x = i * segment_width
-          end_x = (i + 1) * segment_width if i < 6 else width
-          image[:, start_x:end_x] = colors[i]
-      return image
+所有图像源都配置在 `config_stream.yaml` 的 `streamer.sources` 中。通用结构如下：
 
-    def initialize(self, **kwargs) -> bool: return True
-    def get_image(self) -> np.ndarray: pass
-    def get_info(self) -> dict: pass
-    def release(self, **kwargs) -> bool: pass
-    def set_config(self, **kwargs) -> bool: pass
-    def get_available_configs(self) -> List[Dict[str, Any]]:pass
-
-```
-
-把Source添加到SourceManager
-```python
-from capture.video_source.video_source import VideoFileSource
-
-class SourceManager:
-    """图像源管理器"""
-    # 其余代码不变
-    def create_source(self, source_type: SourceType,
-                      source_id: str = "", **kwargs) -> Optional[str]:
-        """创建图像源"""
-        # 上面代码不动
-        #...添加下面这样，让程序识别配置文件
-        elif source_type == SourceType.VIDEO_FILE:
-            video_path = kwargs.get('video_path')
-            source = VideoFileSource(source_type=source_type,source_id=source_id)
-
-
-```
-
-
-然后在配置文件 `config_stream.yaml`中，添加这个源
 ```yaml
 streamer:
   sources:
-    - type: "video_file" # 视频
-      id: "video_player"
-      params:
-        display_idx: 0
-        fps: 30
-  active_source: "video_player" # 启用该源
-```
-点击推流，就会出现彩虹色图片
-![demo_source.png](demo_source.png)
+    - type: demo
+      id: demo1
+      enable: true
+      params: {}
 
-接下来嫌麻烦，不想自己做，直接让AI帮你做，描述需求
-```yaml
-# 帮我实现一下类型为VIDEO_FILE接口，功能是循环播放指定目录的所有MP4视频，调用capture返回正在播放的某一帧，可以通过参数设置帧率和指定目录，可以指定第一个播放的视频，可以设置是否开启自动播放下一个视频，可以开启是否乱序播放，如果关闭自动播放下一个视频就循环播放指定的第一个视频，指定的视频文件名称也是通过参数传入。
-# 粘贴source_mamager.py文件以及streamer.py文件以及config_stream.yaml给他
-# 示例配置
-streamer:
-  sources:
-    - type: "video_file" # 视频
-      id: "video_player"
-      params:
-        video_path: 'C:\Users\Administrator\Desktop\obsrecord'
-        auto_play_next: True  # 是否自动循环播放全部视频
-        random_play: True # 是否开启乱序循环播放
-        first_play_video: 'play_me.mp4'  # 指定第一个播放的视频
-        fps: 30
+  active_source: demo1
 ```
-二话不说直接生成了
+
+字段说明：
+
+| 字段 | 是否必填 | 说明 |
+| --- | --- | --- |
+| `type` | 是 | 图像源类型 |
+| `id` | 是 | 图像源的唯一名称，用于界面显示和 `active_source` 引用 |
+| `enable` | 否 | 是否在启动时初始化，默认为 `true` |
+| `params` | 视类型而定 | 该图像源的专属参数 |
+| `active_source` | 是 | 程序启动后默认使用的图像源 ID |
+
+目前支持以下类型：
+
+| `type` | 用途 | 主要参数 |
+| --- | --- | --- |
+| `demo` | 内置测试画面 | 无 |
+| `screen` | 屏幕、区域或窗口截图 | `display_idx`、`region`、`window_title`、`use_mss` |
+| `video_file` | 循环播放目录中的 MP4 视频 | `video_path`、`auto_play_next`、`random_play`、`first_play_video` |
+| `audio_visualization` | 将音频输入绘制为动态画面 | `target_device`、`input`、`effects` |
+| `camera` | 本地摄像头 | `camera_idx`、`resolution`、`fps` |
+| `rtsp` | 网络视频流 | `rtsp_url`、`timeout`、`rtsp_transport` |
+
+> `active_source` 必须指向一个已启用且初始化成功的源。无效的视频路径、找不到的窗口、不可连接的 RTSP 地址或不可用的音频设备都可能使对应源初始化失败。暂时不用的源应设置为 `enable: false`。
+
+### 屏幕截图
+
+全屏截图：
+
+```yaml
+- type: screen
+  id: fullscreen
+  params:
+    display_idx: 0
+    fps: 30
+    use_mss: true
+```
+
+指定区域截图，`region` 的格式为 `[左上角 X, 左上角 Y, 宽度, 高度]`：
+
+```yaml
+- type: screen
+  id: screen_region
+  params:
+    display_idx: 0
+    region: [100, 100, 800, 800]
+    fps: 30
+    use_mss: true
+```
+
+指定窗口截图：
+
+```yaml
+- type: screen
+  id: game_window
+  params:
+    window_title: 原神
+    remove_title_bar: true
+    fps: 30
+    use_mss: false
+```
+
+`window_title` 支持匹配可见窗口标题。若按窗口截图出现黑屏，可尝试将 `use_mss` 改为 `true`；使用 MSS 时，被遮挡区域可能会一并采集。
+
+程序运行后，选择 `screen` 类型的源，还可以在界面中输入坐标、鼠标框选区域或恢复全屏，修改会实时生效。
+
+### 本地视频
+
+`video_path` 应指向一个包含 MP4 视频的目录：
+
+```yaml
+- type: video_file
+  id: video_player
+  enable: true
+  params:
+    video_path: sample_video
+    auto_play_next: true
+    auto_crop_center: true
+    random_play: true
+    # first_play_video: example.mp4
+    fps: 30
+```
+
+使用 Windows 绝对路径时，建议使用单引号或正斜杠，例如：
+
+```yaml
+video_path: 'D:\Videos\ESP32'
+# 或
+video_path: D:/Videos/ESP32
+```
+
+路径不存在时程序会尝试回退到仓库自带的 `sample_video` 目录；如果回退目录中也没有 MP4 文件，该源会初始化失败。建议将路径改正确，或先设置 `enable: false`。
+
+### 摄像头
+
+```yaml
+- type: camera
+  id: webcam
+  enable: true
+  params:
+    camera_idx: 0
+    resolution: [1280, 720]
+    fps: 25
+```
+
+`camera_idx` 一般从 `0` 开始。如果摄像头被其他程序占用，该源可能初始化失败。
+
+### RTSP
+
+```yaml
+- type: rtsp
+  id: network_camera
+  enable: true
+  params:
+    rtsp_url: rtsp://user:password@192.168.1.100:8554/live
+    timeout: 3
+    rtsp_transport: tcp
+```
+
+程序启动时会连接所有已启用的 RTSP 源。地址不可用会延长启动时间或导致该源初始化失败，因此不使用时请设置 `enable: false`。
+
+## 音频可视化
+
+音频可视化会采集一个录音设备，并将声音转换为频谱、波形、光环、粒子等画面。若只需要共享屏幕或播放视频，可以跳过本节。
+
+### 1. 安装并配置 VB-CABLE
+
+1. 安装 [VB-CABLE](https://vb-audio.com/Cable/)；
+2. 打开 Windows“设置 → 系统 → 声音”，将播放设备设为 `CABLE Input`；
+3. 某些播放器切换输出设备后需要重启；
+4. 打开“更多声音设置 → 录制 → CABLE Output → 属性 → 侦听”；
+5. 勾选“侦听此设备”，并选择实际扬声器，以便电脑仍能播放声音。
+
+![选择 CABLE Input](cable_input.png)
+
+![侦听 CABLE Output](audio_output_setting.png)
+
+### 2. 配置音频源
+
+```yaml
+- type: audio_visualization
+  id: audio_visual1
+  enable: true
+  params:
+    target_device: CABLE Output
+    input:
+      gain: 1.0
+      noise_gate: 0.0015
+      beat_sensitivity: 1.25
+    effects:
+      spectrum_bars:
+        enabled: true
+        params:
+          bars: 16
+          height: 0.7
+          smoothing: 0.76
+          gap: 2
+          glow: 0.7
+      particles:
+        enabled: true
+        params:
+          count: 120
+          spawn: 0.8
+          speed: 1.0
+          size: 3.2
+          drift: 0.65
+```
+
+若找不到 `target_device` 指定的设备，程序会尝试使用系统默认录音设备。
+
+程序中的“音频可视化工作台”可以实时启用、叠加和调整效果。“保存参数”会写回 `config_stream.yaml`；效果组合预设可以保存、应用、覆盖或删除完整的效果组合。
+
+内置效果包括：丝带波形、玻璃频谱、轨道脉冲、棱镜光环、脉冲隧道、镜像城市、极光丝幕、星芒脉冲、流光瀑布和萤火粒子。完整参数及预设请参考仓库自带的 `config_stream.yaml`。
+
+## 推流参数建议
+
+| 使用场景 | 分辨率 | 色彩 | 每包行数 | 发送间隔 |
+| --- | --- | --- | --- | --- |
+| 推荐起步配置 | 240 × 240 | RGB332 | 6 | 0.001 s |
+| 更好色彩 | 240 × 240 | RGB565 | 3 | 0.00075 s |
+| 网络较差 | 180 × 180 | RGB332 | 6 | 0.001 s |
+
+RGB565 色彩更好，但数据量约为 RGB332 的两倍。如果画面花屏、卡顿或丢帧，优先尝试 RGB332、降低分辨率，或适当增大发送间隔。
+
+## 常见问题
+
+### 程序一启动就退出或提示图像源初始化失败
+
+- 将 `config_stream.yaml` 中的 `active_source` 改为 `demo1`；
+- 把暂时不用的音频、RTSP、摄像头或视频源设置为 `enable: false`；
+- 检查 `video_path`、`window_title` 和 `rtsp_url` 是否有效；
+- 确保从项目根目录运行 `main_ui.py`；
+- 重新执行 `uv sync`，确认依赖安装完整。
+
+### 程序在发送，但 ESP32 没有画面
+
+- 确认填写的是 ESP32 IP；
+- 确认电脑和 ESP32 位于同一局域网；
+- 确认两端 UDP 端口一致，推荐固件默认为 `8888`；
+- 允许 Python 通过 Windows 防火墙；
+- 先用 `demo1 + 240 × 240 + RGB332` 排除图像源和带宽问题；
+- 检查 ESP32 串口日志是否已进入接收状态。
+
+### 截取窗口时画面全黑
+
+- 将该源的 `use_mss` 改为 `true`；
+- 尝试窗口化或无边框窗口模式；
+- 避免最小化目标窗口；
+- 某些使用硬件保护或独占全屏的程序无法通过普通桌面截图接口采集。
+
+### PowerShell 不允许执行激活脚本
+
+使用 `uv run python main_ui.py` 不需要手动激活虚拟环境。使用普通 `venv` 时，也可以直接调用 `.\.venv\Scripts\python.exe`，无需修改 PowerShell 执行策略。
+
+## 开发与测试
+
+运行现有单元测试：
+
+```powershell
+uv run python -m unittest discover -s capture -p "test*.py"
+```
+
+新增图像源时：
+
+1. 在 `capture/interface.py` 的 `SourceType` 中声明类型；
+2. 实现 `ImageSourceInterface` 接口；
+3. 在 `capture/source_manager.py` 中注册创建逻辑；
+4. 在 `config_stream.yaml` 中添加对应配置；
+5. 确保初始化失败时能够释放摄像头、网络连接、音频流等资源。
+
+每个音频效果位于 `capture/audio_visualization_source/effects/` 下。新增效果类并在该目录的 `__init__.py` 中注册后，界面会根据效果元数据自动生成名称、说明、开关和参数控件。
+
+## 项目截图
+
+![ESP32 显示效果](demo.jpg)
+
+## License
+
+本项目使用 [GNU General Public License v3.0](LICENSE)。
