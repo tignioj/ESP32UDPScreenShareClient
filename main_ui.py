@@ -101,6 +101,9 @@ class YAMLConfigEditor:
         }
         self.default_preset_name = "预设5：120 高清色彩"
         self.custom_preset_label = "自定义配置"
+        self.builtin_preset_prefix = "内置 · "
+        self.personal_preset_prefix = "个人 · "
+        self.personal_presets = {}
 
         # 首次启动没有 config.yaml 时使用预设5的发送参数。
         default_preset = self.presets[self.default_preset_name]
@@ -127,7 +130,7 @@ class YAMLConfigEditor:
         }
 
         # 预设变量
-        self.preset_var = tk.StringVar(value=self.default_preset_name)
+        self.preset_var = tk.StringVar(value=self.format_udp_preset_label("builtin", self.default_preset_name))
         self.preset_summary_var = tk.StringVar(value="")
         self.updating_udp_controls = False
 
@@ -257,21 +260,38 @@ class YAMLConfigEditor:
         preset_frame = ttk.LabelFrame(udp_tab, text="发送预设", padding=10)
         preset_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
         preset_frame.columnconfigure(1, weight=1)
-        ttk.Label(preset_frame, text="分辨率预设:").grid(row=0, column=0, sticky=tk.W)
+        ttk.Label(preset_frame, text="UDP 预设:").grid(row=0, column=0, sticky=tk.W)
         self.preset_combo = ttk.Combobox(
             preset_frame,
             textvariable=self.preset_var,
-            values=list(self.presets),
+            values=self.get_udp_preset_labels(),
             state="readonly",
             width=30,
         )
         self.preset_combo.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(8, 0))
         self.preset_combo.bind("<<ComboboxSelected>>", self.on_udp_preset_selected)
+        preset_buttons = ttk.Frame(preset_frame)
+        preset_buttons.grid(row=1, column=1, sticky=tk.W, padx=(8, 0), pady=(6, 0))
+        ttk.Button(
+            preset_buttons,
+            text="保存为个人预设",
+            command=self.save_personal_udp_preset,
+        ).pack(side=tk.LEFT)
+        ttk.Button(
+            preset_buttons,
+            text="删除个人预设",
+            command=self.delete_personal_udp_preset,
+        ).pack(side=tk.LEFT, padx=(8, 0))
         ttk.Label(
             preset_frame,
             textvariable=self.preset_summary_var,
             foreground="#356a8a",
-        ).grid(row=1, column=1, sticky=tk.W, pady=(5, 0))
+        ).grid(row=2, column=1, sticky=tk.W, padx=(8, 0), pady=(5, 0))
+        ttk.Label(
+            preset_frame,
+            text="内置预设只读；个人预设可保存多份完整 UDP 配置。",
+            foreground="#777777",
+        ).grid(row=3, column=1, sticky=tk.W, padx=(8, 0), pady=(4, 0))
 
         destination_frame = ttk.LabelFrame(udp_tab, text="接收端", padding=10)
         destination_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
@@ -330,6 +350,8 @@ class YAMLConfigEditor:
         for key in ('resolution', 'color_mode'):
             self.entries[key].bind("<<ComboboxSelected>>", self.on_udp_parameter_edited)
         for key in ('lines_per_packet', 'udp_interval'):
+            self.entries[key].bind("<KeyRelease>", self.on_udp_parameter_edited)
+        for key in ('server_ip', 'server_port'):
             self.entries[key].bind("<KeyRelease>", self.on_udp_parameter_edited)
 
         udp_action_frame = ttk.Frame(udp_tab)
@@ -1550,19 +1572,118 @@ class YAMLConfigEditor:
         self.log_text.config(state=tk.DISABLED)
         self.root.update_idletasks()  # 立即更新界面
 
+    def format_udp_preset_label(self, preset_type, preset_name):
+        """为下拉框生成带类别的预设名称。"""
+        prefix = self.builtin_preset_prefix if preset_type == "builtin" else self.personal_preset_prefix
+        return f"{prefix}{preset_name}"
+
+    def get_udp_preset_labels(self):
+        """内置预设固定在前，个人预设按保存顺序显示在后。"""
+        return [
+            *(self.format_udp_preset_label("builtin", name) for name in self.presets),
+            *(self.format_udp_preset_label("personal", name) for name in self.personal_presets),
+        ]
+
+    def parse_udp_preset_label(self, label):
+        """将下拉框文字解析为 (类别, 名称)，自定义配置返回空值。"""
+        if label.startswith(self.builtin_preset_prefix):
+            name = label[len(self.builtin_preset_prefix):]
+            if name in self.presets:
+                return "builtin", name
+        if label.startswith(self.personal_preset_prefix):
+            name = label[len(self.personal_preset_prefix):]
+            if name in self.personal_presets:
+                return "personal", name
+        return None, None
+
+    def refresh_udp_preset_list(self, selected_label=None):
+        """个人预设变动后刷新选择器，并尽量保留当前选择。"""
+        labels = self.get_udp_preset_labels()
+        self.preset_combo.configure(values=labels)
+        if selected_label in labels:
+            self.preset_var.set(selected_label)
+
+    def normalize_personal_udp_presets(self, raw_presets):
+        """读取个人预设，忽略损坏或不完整的条目。"""
+        if raw_presets is None:
+            return {}
+        if not isinstance(raw_presets, dict):
+            raise ValueError("personal_presets 必须是 YAML 对象")
+
+        normalized = {}
+        for raw_name, raw_config in raw_presets.items():
+            name = str(raw_name).strip()
+            if not name or "\n" in name or "\r" in name or len(name) > 80:
+                continue
+            if not isinstance(raw_config, dict):
+                continue
+            try:
+                resolution = raw_config['resolution']
+                config = {
+                    'server_ip': str(raw_config['server_ip']),
+                    'server_port': int(raw_config['server_port']),
+                    'resolution': [int(resolution[0]), int(resolution[1])],
+                    'color_mode': str(raw_config['color_mode']),
+                    'lines_per_packet': int(raw_config['lines_per_packet']),
+                    'udp_interval': float(raw_config['udp_interval']),
+                }
+            except (KeyError, TypeError, ValueError, IndexError):
+                continue
+            if (
+                config['server_ip']
+                and 0 < config['server_port'] < 65536
+                and config['resolution'] in self.valid_resolution_values
+                and config['color_mode'] in self.valid_values['color_mode']
+                and 1 <= config['lines_per_packet'] <= 8
+                and 0.0001 <= config['udp_interval'] <= 0.1
+            ):
+                normalized[name] = config
+        return normalized
+
+    def configs_equal(self, first, second):
+        """比较两份完整 UDP 配置，避免浮点文本格式导致误判。"""
+        try:
+            return (
+                first.get('server_ip') == second.get('server_ip')
+                and int(first.get('server_port')) == int(second.get('server_port'))
+                and list(first.get('resolution')) == list(second.get('resolution'))
+                and first.get('color_mode') == second.get('color_mode')
+                and int(first.get('lines_per_packet')) == int(second.get('lines_per_packet'))
+                and abs(float(first.get('udp_interval')) - float(second.get('udp_interval'))) < 1e-12
+            )
+        except (TypeError, ValueError):
+            return False
+
+    def find_matching_personal_preset(self, config):
+        for name, preset in self.personal_presets.items():
+            if self.configs_equal(config, preset):
+                return name
+        return None
+
     def on_udp_preset_selected(self, event=None):
         """下拉框选择后立即应用预设。"""
         self.apply_preset(self.preset_var.get(), restart_if_streaming=True)
 
-    def update_preset_summary(self, preset_name):
-        preset = self.presets.get(preset_name)
-        if preset is None:
-            self.preset_summary_var.set("当前参数不属于内置预设")
+    def update_preset_summary(self, preset_label):
+        preset_type, preset_name = self.parse_udp_preset_label(preset_label or "")
+        if preset_type == "personal":
+            preset = self.personal_presets[preset_name]
+            color = "RGB565 高清色彩" if preset['color_mode'] == "rgb565" else "RGB332 节省带宽"
+            interval_ms = preset['udp_interval'] * 1000
+            self.preset_summary_var.set(
+                f"个人 · {preset['server_ip']}:{preset['server_port']} · "
+                f"{preset['resolution'][0]} × {preset['resolution'][1]} · {color} · "
+                f"每包 {preset['lines_per_packet']} 行 · {interval_ms:g} ms"
+            )
             return
+        if preset_type != "builtin":
+            self.preset_summary_var.set("当前参数尚未保存为预设")
+            return
+        preset = self.presets[preset_name]
         color = "RGB565 高清色彩" if preset['color_mode'] == 0 else "RGB332 节省带宽"
         interval_ms = preset['udp_interval'] * 1000
         self.preset_summary_var.set(
-            f"{preset['resolution']} × {preset['resolution']} · {color} · "
+            f"内置只读 · {preset['resolution']} × {preset['resolution']} · {color} · "
             f"每包 {preset['lines_per_packet']} 行 · {interval_ms:g} ms"
         )
 
@@ -1604,36 +1725,72 @@ class YAMLConfigEditor:
         if self.updating_udp_controls:
             return
         try:
-            preset_name = self.get_matching_preset(self.get_udp_form_config())
+            config = self.get_udp_form_config()
         except (TypeError, ValueError):
-            preset_name = None
-        self.preset_var.set(preset_name or self.custom_preset_label)
-        self.update_preset_summary(preset_name)
+            config = None
 
-    def apply_preset(self, preset_name, restart_if_streaming=False):
+        current_type, current_name = self.parse_udp_preset_label(self.preset_var.get())
+        preset_label = None
+        if config is not None and current_type == "personal":
+            if self.configs_equal(config, self.personal_presets[current_name]):
+                preset_label = self.format_udp_preset_label("personal", current_name)
+        elif config is not None and current_type == "builtin":
+            if self.get_matching_preset(config) == current_name:
+                preset_label = self.format_udp_preset_label("builtin", current_name)
+
+        if config is not None and preset_label is None:
+            personal_name = self.find_matching_personal_preset(config)
+            builtin_name = self.get_matching_preset(config)
+            if personal_name:
+                preset_label = self.format_udp_preset_label("personal", personal_name)
+            elif builtin_name:
+                preset_label = self.format_udp_preset_label("builtin", builtin_name)
+        self.preset_var.set(preset_label or self.custom_preset_label)
+        self.update_preset_summary(preset_label)
+
+    def apply_preset(self, preset_label, restart_if_streaming=False):
         """应用预设；仅在原本正在推流时重启发送线程。"""
-        preset = self.presets.get(preset_name)
-        if preset is None:
+        preset_type, preset_name = self.parse_udp_preset_label(preset_label)
+        if preset_type is None and preset_label in self.presets:
+            # 兼容内部旧调用和旧版 config.yaml 中的名称。
+            preset_type, preset_name = "builtin", preset_label
+            preset_label = self.format_udp_preset_label(preset_type, preset_name)
+        if preset_type == "builtin":
+            preset = self.presets[preset_name]
+        elif preset_type == "personal":
+            preset = self.personal_presets[preset_name]
+        else:
             return
 
         was_streaming = self.streaming
         self.updating_udp_controls = True
         try:
-            resolution_val = preset['resolution']
-            self.entries['resolution'].set(f"[{resolution_val},{resolution_val}]")
-            self.entries['color_mode'].set("rgb565" if preset['color_mode'] == 0 else "rgb332")
+            if preset_type == "personal":
+                self.entries['server_ip'].delete(0, tk.END)
+                self.entries['server_ip'].insert(0, preset['server_ip'])
+                self.entries['server_port'].delete(0, tk.END)
+                self.entries['server_port'].insert(0, str(preset['server_port']))
+                resolution = preset['resolution']
+                color_mode = preset['color_mode']
+            else:
+                resolution = [preset['resolution'], preset['resolution']]
+                color_mode = "rgb565" if preset['color_mode'] == 0 else "rgb332"
+
+            self.entries['resolution'].set(f"[{resolution[0]},{resolution[1]}]")
+            self.entries['color_mode'].set(color_mode)
 
             self.entries['lines_per_packet'].delete(0, tk.END)
             self.entries['lines_per_packet'].insert(0, str(preset['lines_per_packet']))
             self.entries['udp_interval'].delete(0, tk.END)
             self.entries['udp_interval'].insert(0, str(preset['udp_interval']))
-            self.preset_var.set(preset_name)
-            self.update_preset_summary(preset_name)
+            self.preset_var.set(preset_label)
+            self.update_preset_summary(preset_label)
         finally:
             self.updating_udp_controls = False
 
-        self.log_message(f"已应用发送预设: {preset_name}")
-        self.status_var.set(f"已应用发送预设: {preset_name}")
+        category = "内置" if preset_type == "builtin" else "个人"
+        self.log_message(f"已应用{category}发送预设: {preset_name}")
+        self.status_var.set(f"已应用{category}发送预设: {preset_name}")
         if restart_if_streaming and was_streaming:
             self.stop_streaming()
             self.root.after(120, self.start_streaming)
@@ -1653,6 +1810,8 @@ class YAMLConfigEditor:
                     raise ValueError("配置内容必须是 YAML 对象")
             else:
                 config = self.default_config.copy()
+            self.personal_presets = self.normalize_personal_udp_presets(config.get('personal_presets'))
+            self.refresh_udp_preset_list()
             if using_default_config:
                 self.log_message("未找到有效的 UDP 配置，已选择预设5：120 高清色彩")
 
@@ -1678,12 +1837,33 @@ class YAMLConfigEditor:
             finally:
                 self.updating_udp_controls = False
 
-            preset_name = self.get_matching_preset(self.get_udp_form_config())
-            if using_default_config and preset_name is None:
-                preset_name = self.default_preset_name
-                self.apply_preset(preset_name)
-            self.preset_var.set(preset_name or self.custom_preset_label)
-            self.update_preset_summary(preset_name)
+            current_config = self.get_udp_form_config()
+            saved_type = config.get('preset_type')
+            saved_name = config.get('preset')
+            preset_label = None
+            if (
+                saved_type == 'personal'
+                and saved_name in self.personal_presets
+                and self.configs_equal(current_config, self.personal_presets[saved_name])
+            ):
+                preset_label = self.format_udp_preset_label('personal', saved_name)
+            elif (
+                saved_name in self.presets
+                and self.get_matching_preset(current_config) == saved_name
+            ):
+                preset_label = self.format_udp_preset_label('builtin', saved_name)
+            else:
+                personal_name = self.find_matching_personal_preset(current_config)
+                builtin_name = self.get_matching_preset(current_config)
+                if personal_name:
+                    preset_label = self.format_udp_preset_label('personal', personal_name)
+                elif builtin_name:
+                    preset_label = self.format_udp_preset_label('builtin', builtin_name)
+            if using_default_config and preset_label is None:
+                preset_label = self.format_udp_preset_label('builtin', self.default_preset_name)
+                self.apply_preset(preset_label)
+            self.preset_var.set(preset_label or self.custom_preset_label)
+            self.update_preset_summary(preset_label)
 
             if not using_default_config:
                 self.log_message(f"已自动加载 UDP 配置: {self.config_file}")
@@ -1782,6 +1962,106 @@ class YAMLConfigEditor:
         else:
             return ESP32UDPHeader.COLOR_RGB332  # 1
 
+    def build_udp_config_document(self, config=None):
+        """生成兼容旧版字段、并包含全部个人预设的配置文档。"""
+        current = dict(config or self.get_udp_form_config())
+        preset_type, preset_name = self.parse_udp_preset_label(self.preset_var.get())
+        if preset_type == 'personal':
+            if not self.configs_equal(current, self.personal_presets[preset_name]):
+                preset_type = preset_name = None
+        elif preset_type == 'builtin':
+            if self.get_matching_preset(current) != preset_name:
+                preset_type = preset_name = None
+
+        if preset_type is None:
+            personal_name = self.find_matching_personal_preset(current)
+            builtin_name = self.get_matching_preset(current)
+            if personal_name:
+                preset_type, preset_name = 'personal', personal_name
+            elif builtin_name:
+                preset_type, preset_name = 'builtin', builtin_name
+
+        if preset_type:
+            current['preset_type'] = preset_type
+            current['preset'] = preset_name
+        current['personal_presets'] = {
+            name: dict(values) for name, values in self.personal_presets.items()
+        }
+        return current
+
+    def write_udp_config(self, config=None):
+        document = self.build_udp_config_document(config)
+        with open(self.config_file, 'w', encoding='utf-8') as f:
+            yaml.safe_dump(document, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        return document
+
+    def save_personal_udp_preset(self):
+        """将当前完整 UDP 配置保存为一个命名个人预设。"""
+        errors = self.validate_inputs()
+        if errors:
+            messagebox.showerror("输入错误", "\n".join(errors))
+            return
+
+        selected_type, selected_name = self.parse_udp_preset_label(self.preset_var.get())
+        name = simpledialog.askstring(
+            "保存个人预设",
+            "请输入个人预设名称:",
+            initialvalue=selected_name if selected_type == 'personal' else "",
+            parent=self.root,
+        )
+        if name is None:
+            return
+        name = name.strip()
+        if not name:
+            messagebox.showwarning("提示", "个人预设名称不能为空")
+            return
+        if "\n" in name or "\r" in name or len(name) > 80:
+            messagebox.showwarning("提示", "个人预设名称不能换行且最多 80 个字符")
+            return
+        if name in self.personal_presets and not messagebox.askyesno(
+            "覆盖个人预设",
+            f"个人预设“{name}”已存在，是否覆盖？",
+        ):
+            return
+
+        try:
+            self.personal_presets[name] = self.get_udp_form_config()
+            label = self.format_udp_preset_label('personal', name)
+            self.refresh_udp_preset_list(label)
+            self.update_preset_summary(label)
+            self.write_udp_config()
+            self.log_message(f"个人 UDP 预设已保存: {name}")
+            self.status_var.set(f"已保存个人 UDP 预设: {name}")
+        except Exception as e:
+            messagebox.showerror("错误", f"保存个人 UDP 预设失败: {str(e)}")
+            self.log_message(f"保存个人 UDP 预设失败: {str(e)}")
+
+    def delete_personal_udp_preset(self):
+        """删除当前选中的个人预设；内置预设始终不可删除。"""
+        preset_type, preset_name = self.parse_udp_preset_label(self.preset_var.get())
+        if preset_type != 'personal':
+            messagebox.showinfo("内置预设只读", "只能删除个人预设，内置预设不可修改或删除。")
+            return
+        if not messagebox.askyesno("删除个人预设", f"确定删除个人预设“{preset_name}”吗？"):
+            return
+
+        try:
+            del self.personal_presets[preset_name]
+            builtin_name = self.get_matching_preset(self.get_udp_form_config())
+            label = (
+                self.format_udp_preset_label('builtin', builtin_name)
+                if builtin_name else self.custom_preset_label
+            )
+            self.refresh_udp_preset_list()
+            self.preset_var.set(label)
+            self.update_preset_summary(label)
+            self.write_udp_config()
+            self.log_message(f"个人 UDP 预设已删除: {preset_name}")
+            self.status_var.set(f"已删除个人 UDP 预设: {preset_name}")
+        except Exception as e:
+            messagebox.showerror("错误", f"删除个人 UDP 预设失败: {str(e)}")
+            self.log_message(f"删除个人 UDP 预设失败: {str(e)}")
+
     def save_config(self):
         """保存固定位置的 UDP 配置文件。"""
         errors = self.validate_inputs()
@@ -1791,13 +2071,7 @@ class YAMLConfigEditor:
 
         try:
             config = self.get_udp_form_config()
-            preset_name = self.get_matching_preset(config)
-            if preset_name:
-                config['preset'] = preset_name
-
-            # 保存到文件
-            with open(self.config_file, 'w', encoding='utf-8') as f:
-                yaml.safe_dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+            self.write_udp_config(config)
 
             self.log_message(f"UDP 配置已保存: {self.config_file}")
             self.status_var.set(f"UDP 配置已保存: {self.config_file}")
@@ -1815,10 +2089,7 @@ class YAMLConfigEditor:
     def show_yaml(self):
         """显示当前配置的YAML格式"""
         try:
-            config = self.get_udp_form_config()
-            preset_name = self.get_matching_preset(config)
-            if preset_name:
-                config['preset'] = preset_name
+            config = self.build_udp_config_document()
 
             # 生成YAML字符串
             yaml_str = yaml.safe_dump(
