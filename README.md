@@ -1,15 +1,9 @@
 # ESP32 UDP Screen Share Client
 
-## Windows 发行版
-
-GitHub Release 提供免安装的 Windows x64 压缩包。下载 `ESP32UDPScreenShareClient-<tag>-windows-x64.zip`，解压后运行其中的 `ESP32UDPScreenShareClient.exe`。
-
-维护者在 `main` 分支的提交上推送形如 `v0.0.7` 的 tag 后，GitHub Actions 会自动执行测试、打包并创建或更新对应的 Release。也可以在 Actions 页面的 **Build and release Windows app** 工作流中选择 **Run workflow**，输入一个已有 tag 手动重新构建发布。
-
 一个面向 ESP32 屏幕接收端的 Windows 桌面推流工具。程序可以采集屏幕、窗口、本地视频、摄像头、RTSP 流或系统音频可视化画面，并通过 UDP 将图像发送给 ESP32。
 
 - 演示视频：[Bilibili](https://www.bilibili.com/video/BV16R6ABCEVN)
-- 推荐接收端固件：https://github.com/tignioj/ESP32UDPScreenShare/releases
+- 推荐接收端固件：[ESP32UDPScreenShare Releases](https://github.com/tignioj/ESP32UDPScreenShare/releases)
 
 ![程序主界面](main.png)
 
@@ -21,8 +15,17 @@ GitHub Release 提供免安装的 Windows x64 压缩包。下载 `ESP32UDPScreen
 - 支持本地视频、摄像头及 RTSP 图像源
 - 支持音频频谱、波形、粒子等多种可叠加的可视化效果
 - 推流过程中可实时切换图像源、调整截图区域和音频效果
+- 内置推流预览，可查看完成缩放和色彩量化后实际通过 UDP 发送的画面
 - UDP 配置分为不可修改的内置预设和可保存多份的个人预设
 - 支持保存 UDP 参数、音频参数及音频效果组合预设
+
+## Windows 发行版
+
+不想安装 Python 或配置开发环境时，可以直接从 [GitHub Releases](https://github.com/tignioj/ESP32UDPScreenShareClient/releases) 下载免安装的 Windows x64 压缩包。下载 `ESP32UDPScreenShareClient-<tag>-windows-x64.zip`，完整解压后运行其中的 `ESP32UDPScreenShareClient.exe`，不要直接在压缩包内启动。
+
+免安装版的图像源配置位于程序目录下的 `_internal/config_stream.yaml`；程序运行后生成的 UDP 配置和个人预设保存在程序工作目录下的 `config.yaml`。源码版则使用项目根目录下的 `config_stream.yaml` 和 `config.yaml`。
+
+维护者在 `main` 分支的提交上推送形如 `vX.Y.Z`（例如 `v0.0.9`）的 tag 后，GitHub Actions 会自动执行测试、打包并创建或更新对应的 Release。也可以在 Actions 页面的 **Build and release Windows app** 工作流中选择 **Run workflow**，输入一个已有 tag 手动重新构建发布。
 
 ## 运行环境
 
@@ -34,7 +37,7 @@ GitHub Release 提供免安装的 Windows x64 压缩包。下载 `ESP32UDPScreen
 | 网络 | 电脑与 ESP32 位于同一局域网，且 UDP 通信未被防火墙拦截 |
 | 接收端 | 已刷入兼容的 ESP32 UDP 屏幕接收固件 |
 
-音频可视化不是普通推流的必需条件；只有采集系统播放声音时才需要安装 VB-CABLE。
+音频可视化不是普通推流的必需条件；只有采集系统播放声音时才需要安装 VB-CABLE。使用免安装版不需要另行安装 Python 或 uv。
 
 ## 快速开始
 
@@ -46,9 +49,20 @@ GitHub Release 提供免安装的 Windows x64 压缩包。下载 `ESP32UDPScreen
 
 - 电脑和 ESP32 连接到同一个路由器或局域网；
 - 路由器没有开启会隔离设备的“访客网络”或“客户端隔离”；
-- Windows 防火墙允许 Python 访问专用网络。
+- Windows 防火墙允许 `ESP32UDPScreenShareClient.exe` 或 Python 访问专用网络。
 
-### 2. 获取项目
+### 2. 选择运行方式
+
+#### 使用 Windows 免安装版
+
+1. 打开[项目 Releases 页面](https://github.com/tignioj/ESP32UDPScreenShareClient/releases)，下载最新的 `ESP32UDPScreenShareClient-<tag>-windows-x64.zip`；
+2. 将压缩包完整解压到一个可写目录；
+3. 首次验证时，建议编辑 `_internal/config_stream.yaml`，将 `streamer.active_source` 改为 `demo1`；
+4. 双击 `ESP32UDPScreenShareClient.exe` 启动程序。
+
+#### 从源码运行
+
+获取项目：
 
 ```powershell
 git clone https://github.com/tignioj/ESP32UDPScreenShareClient.git
@@ -57,7 +71,7 @@ cd ESP32UDPScreenShareClient
 
 如果已经下载了项目，直接在项目根目录打开 PowerShell 即可。后续命令必须在包含 `main_ui.py` 和 `config_stream.yaml` 的目录中执行。
 
-### 3. 安装 uv 和项目依赖
+安装 uv 和项目依赖：
 
 先按 [uv 官方文档](https://docs.astral.sh/uv/getting-started/installation/) 安装 uv，然后执行：
 
@@ -67,9 +81,7 @@ uv sync
 
 `uv sync` 会根据 `pyproject.toml` 和 `uv.lock` 创建虚拟环境并安装所需依赖。
 
-### 4. 首次运行前选择一个可靠的图像源
-
-程序启动时会读取根目录下的 `config_stream.yaml`，并初始化其中所有未设置 `enable: false` 的图像源。
+首次运行前选择一个可靠的图像源。源码版启动时会读取项目根目录下的 `config_stream.yaml`，并初始化其中所有未设置 `enable: false` 的图像源。
 
 首次验证建议将文件底部的活动源改成内置测试画面，避免因为音频设备、窗口标题或视频路径无效而启动失败：
 
@@ -79,11 +91,13 @@ streamer:
   active_source: demo1
 ```
 
-### 5. 启动程序
+启动程序：
 
 ```powershell
 uv run python main_ui.py
 ```
+
+### 3. 配置并开始推流
 
 窗口打开后：
 
@@ -91,14 +105,14 @@ uv run python main_ui.py
 2. 将 UDP 端口保持为接收端使用的端口，推荐固件默认为 `8888`；
 3. 从“UDP 预设”下拉列表选择内置或个人预设，选择后会立即应用；
 4. 在“2 图像源配置”页签中选择需要的来源并点击“切换”；
-5. 点击“开始推流”，观察日志中的帧率、包速率和错误信息；
+5. 点击“开始推流”，在右侧查看完成缩放和色彩量化后的实际发送画面，并观察日志中的帧率、包速率和错误信息；
 6. 需要结束时点击“停止推流”。
 
 6 个“内置”预设由程序提供，只能应用，不能修改或删除。调整地址或传输参数后，点击“保存为个人预设”并输入名称，即可保存一份包含服务器地址、UDP 端口和全部传输参数的个人预设；可以保存多份，也可以覆盖或删除已选中的个人预设。
 
-保存、覆盖或删除个人预设时，程序会把当前配置、当前预设类型以及全部个人预设写入根目录的 `config.yaml`，下次启动自动读取。旧版扁平格式的 `config.yaml` 仍可直接加载；首次启动没有该文件时，程序默认选择“预设5：120 高清色彩”。
+保存、覆盖或删除个人预设时，程序会把当前配置、当前预设类型以及全部个人预设写入程序工作目录下的 `config.yaml`，下次启动自动读取。旧版扁平格式的 `config.yaml` 仍可直接加载；首次启动没有该文件时，程序默认选择“预设5：120 高清色彩”。
 
-### 不使用 uv
+### 可选：源码版不使用 uv
 
 也可以使用 Python 自带的虚拟环境。以下命令不需要激活虚拟环境：
 
@@ -110,7 +124,7 @@ py -3.10 -m venv .venv
 
 ## 图像源配置
 
-所有图像源都配置在 `config_stream.yaml` 的 `streamer.sources` 中。通用结构如下：
+所有图像源都配置在 `config_stream.yaml` 的 `streamer.sources` 中。源码版使用项目根目录下的文件，免安装版使用 `_internal` 目录下的文件。通用结构如下：
 
 ```yaml
 streamer:
@@ -316,10 +330,10 @@ RGB565 色彩更好，但数据量约为 RGB332 的两倍。如果画面花屏�
 
 ### 程序一启动就退出或提示图像源初始化失败
 
-- 将 `config_stream.yaml` 中的 `active_source` 改为 `demo1`；
+- 将当前运行方式使用的 `config_stream.yaml` 中的 `active_source` 改为 `demo1`；
 - 把暂时不用的音频、RTSP、摄像头或视频源设置为 `enable: false`；
 - 检查 `video_path`、`window_title` 和 `rtsp_url` 是否有效；
-- 确保从项目根目录运行 `main_ui.py`；
+- 使用源码版时，确保从项目根目录运行 `main_ui.py`；
 - 重新执行 `uv sync`，确认依赖安装完整。
 
 ### 程序在发送，但 ESP32 没有画面
