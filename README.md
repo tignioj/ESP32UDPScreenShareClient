@@ -1,5 +1,11 @@
 # ESP32 UDP Screen Share Client
 
+## Windows 发行版
+
+GitHub Release 提供免安装的 Windows x64 压缩包。下载 `ESP32UDPScreenShareClient-<tag>-windows-x64.zip`，解压后运行其中的 `ESP32UDPScreenShareClient.exe`。
+
+维护者在 `main` 分支的提交上推送形如 `v0.0.7` 的 tag 后，GitHub Actions 会自动执行测试、打包并创建或更新对应的 Release。也可以在 Actions 页面的 **Build and release Windows app** 工作流中选择 **Run workflow**，输入一个已有 tag 手动重新构建发布。
+
 一个面向 ESP32 屏幕接收端的 Windows 桌面推流工具。程序可以采集屏幕、窗口、本地视频、摄像头、RTSP 流或系统音频可视化画面，并通过 UDP 将图像发送给 ESP32。
 
 - 演示视频：[Bilibili](https://www.bilibili.com/video/BV16R6ABCEVN)

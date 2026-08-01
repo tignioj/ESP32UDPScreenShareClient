@@ -1,6 +1,6 @@
 [project]
 name = "esp32-udp-screen-share-client"
-version = "0.0.6"
+version = "0.0.7"
 description = "ESP32 专用屏幕共享 UDP 推流客户端"
 readme = "README.md"
 requires-python = ">=3.10"

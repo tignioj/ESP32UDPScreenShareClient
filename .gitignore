@@ -1,8 +1,10 @@
 /build/
+/dist/
 /release/
 /.idea/
 /util/
 *.spec
+!packaging/windows.spec
 
 # Python bytecode and caches
 __pycache__/
