@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox, filedialog, simpledialog
 import yaml
 import os
 import re
@@ -14,7 +14,13 @@ try:
     import cv2
     import numpy as np
     import socket
-    from  capture.config import get_streamer
+    from capture.config import (
+        delete_audio_preset,
+        get_streamer,
+        load_audio_presets,
+        save_audio_preset,
+        save_source_runtime_config,
+    )
     streamer = get_streamer()
 
     # 初始化
@@ -142,6 +148,8 @@ class YAMLConfigEditor:
         self.audio_selected_effect_enabled_var = tk.BooleanVar(value=False)
         self.audio_effect_description_var = tk.StringVar(value="")
         self.audio_enabled_summary_var = tk.StringVar(value="尚未加载效果")
+        self.audio_preset_var = tk.StringVar(value="")
+        self.audio_presets = {}
         self.audio_input_vars = {}
         self.audio_input_value_vars = {}
         self.audio_effect_parameter_vars = {}
@@ -344,11 +352,19 @@ class YAMLConfigEditor:
             foreground="#666666",
             wraplength=680,
         ).grid(row=1, column=0, sticky=tk.W, pady=(5, 1))
+        audio_summary_frame = ttk.Frame(self.audio_controls_frame)
+        audio_summary_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(0, 6))
+        audio_summary_frame.columnconfigure(0, weight=1)
         ttk.Label(
-            self.audio_controls_frame,
+            audio_summary_frame,
             textvariable=self.audio_enabled_summary_var,
             foreground="#356a8a",
-        ).grid(row=2, column=0, sticky=tk.W, pady=(0, 6))
+        ).grid(row=0, column=0, sticky=tk.W)
+        ttk.Button(
+            audio_summary_frame,
+            text="保存参数",
+            command=self.save_audio_config,
+        ).grid(row=0, column=1, sticky=tk.E)
 
         parameter_columns = ttk.Frame(self.audio_controls_frame)
         parameter_columns.grid(row=3, column=0, sticky=(tk.W, tk.E))
@@ -374,6 +390,37 @@ class YAMLConfigEditor:
         self.audio_effect_parameters_frame = ttk.Frame(effect_frame)
         self.audio_effect_parameters_frame.grid(row=0, column=0, sticky=(tk.W, tk.E))
         self.audio_effect_parameters_frame.columnconfigure(1, weight=1)
+
+        audio_preset_frame = ttk.LabelFrame(
+            self.audio_controls_frame,
+            text="效果组合预设",
+            padding=(8, 5),
+        )
+        audio_preset_frame.grid(row=4, column=0, sticky=(tk.W, tk.E), pady=(7, 0))
+        audio_preset_frame.columnconfigure(1, weight=1)
+        ttk.Label(audio_preset_frame, text="预设:").grid(row=0, column=0, sticky=tk.W)
+        self.audio_preset_combo = ttk.Combobox(
+            audio_preset_frame,
+            textvariable=self.audio_preset_var,
+            state="readonly",
+            width=24,
+        )
+        self.audio_preset_combo.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(6, 8))
+        ttk.Button(
+            audio_preset_frame,
+            text="应用",
+            command=self.apply_audio_preset,
+        ).grid(row=0, column=2, padx=2)
+        ttk.Button(
+            audio_preset_frame,
+            text="保存当前组合",
+            command=self.save_current_audio_preset,
+        ).grid(row=0, column=3, padx=2)
+        ttk.Button(
+            audio_preset_frame,
+            text="删除",
+            command=self.delete_selected_audio_preset,
+        ).grid(row=0, column=4, padx=(2, 0))
 
         self.audio_controls_frame.grid_remove()
 
@@ -691,6 +738,7 @@ class YAMLConfigEditor:
             self.rebuild_audio_input_parameters(config.get('input', {}))
             self.rebuild_selected_audio_effect()
             self.update_audio_enabled_summary()
+            self.refresh_audio_presets(source_id)
             self.audio_controls_frame.grid()
         except Exception as e:
             self.audio_controls_frame.grid_remove()
@@ -801,6 +849,117 @@ class YAMLConfigEditor:
         except Exception as e:
             self.log_message(f"更新音频视觉参数失败: {str(e)}")
             self.refresh_audio_controls()
+
+    def save_audio_config(self):
+        """将当前音频源的完整运行时参数保存到 config_stream.yaml。"""
+        source_id = self.get_selected_source_id()
+        if not source_id or self.source_type_by_id.get(source_id) != 'audio_visualization':
+            messagebox.showwarning("提示", "请先选择一个音频可视化源")
+            return
+
+        try:
+            info = streamer.get_source_info(source_id)
+            runtime_config = info.get('config', {})
+            path = save_source_runtime_config(source_id, runtime_config)
+            self.log_message(f"音频参数已保存: {path}")
+            self.status_var.set(f"音频参数已保存: {source_id}")
+            messagebox.showinfo("成功", "音频参数已保存，下次启动时会自动恢复。")
+        except Exception as e:
+            messagebox.showerror("错误", f"保存音频参数失败: {str(e)}")
+            self.log_message(f"保存音频参数失败: {str(e)}")
+            self.status_var.set("保存音频参数失败")
+
+    def refresh_audio_presets(self, source_id=None):
+        """刷新当前音频源拥有的命名效果组合。"""
+        source_id = source_id or self.get_selected_source_id()
+        try:
+            self.audio_presets = load_audio_presets(source_id) if source_id else {}
+            names = list(self.audio_presets)
+            self.audio_preset_combo.configure(values=names)
+            if self.audio_preset_var.get() not in self.audio_presets:
+                self.audio_preset_var.set(names[0] if names else "")
+        except Exception as e:
+            self.audio_presets = {}
+            self.audio_preset_combo.configure(values=())
+            self.audio_preset_var.set("")
+            self.log_message(f"读取音频预设失败: {str(e)}")
+
+    def save_current_audio_preset(self):
+        """将当前完整音频组合另存为命名预设。"""
+        source_id = self.get_selected_source_id()
+        if not source_id or self.source_type_by_id.get(source_id) != 'audio_visualization':
+            messagebox.showwarning("提示", "请先选择一个音频可视化源")
+            return
+
+        name = simpledialog.askstring(
+            "保存效果组合",
+            "请输入预设名称:",
+            parent=self.root,
+        )
+        if name is None:
+            return
+        name = name.strip()
+        if not name:
+            messagebox.showwarning("提示", "预设名称不能为空")
+            return
+        if name in self.audio_presets and not messagebox.askyesno(
+            "覆盖预设",
+            f"预设“{name}”已存在，是否覆盖？",
+        ):
+            return
+
+        try:
+            runtime_config = streamer.get_source_info(source_id).get('config', {})
+            save_audio_preset(source_id, name, runtime_config)
+            self.refresh_audio_presets(source_id)
+            self.audio_preset_var.set(name)
+            self.log_message(f"音频组合预设已保存: {name}")
+            self.status_var.set(f"已保存音频预设: {name}")
+        except Exception as e:
+            messagebox.showerror("错误", f"保存音频预设失败: {str(e)}")
+            self.log_message(f"保存音频预设失败: {str(e)}")
+
+    def apply_audio_preset(self):
+        """将选中的效果组合应用到当前音频源。"""
+        source_id = self.get_selected_source_id()
+        name = self.audio_preset_var.get()
+        if not source_id or not name:
+            messagebox.showwarning("提示", "请先选择一个音频预设")
+            return
+        try:
+            presets = load_audio_presets(source_id)
+            preset = presets.get(name)
+            if preset is None:
+                raise ValueError(f"找不到音频预设: {name}")
+            if not streamer.set_source_config(preset, source_id):
+                raise ValueError("预设中包含无效或超出范围的参数")
+            self.audio_presets = presets
+            self.refresh_audio_controls()
+            self.audio_preset_var.set(name)
+            self.log_message(f"已应用音频组合预设: {name}")
+            self.status_var.set(f"已应用音频预设: {name}")
+        except Exception as e:
+            messagebox.showerror("错误", f"应用音频预设失败: {str(e)}")
+            self.log_message(f"应用音频预设失败: {str(e)}")
+            self.refresh_audio_presets(source_id)
+
+    def delete_selected_audio_preset(self):
+        """删除当前选中的命名效果组合。"""
+        source_id = self.get_selected_source_id()
+        name = self.audio_preset_var.get()
+        if not source_id or not name:
+            messagebox.showwarning("提示", "请先选择一个音频预设")
+            return
+        if not messagebox.askyesno("删除预设", f"确定删除预设“{name}”吗？"):
+            return
+        try:
+            delete_audio_preset(source_id, name)
+            self.refresh_audio_presets(source_id)
+            self.log_message(f"已删除音频组合预设: {name}")
+            self.status_var.set(f"已删除音频预设: {name}")
+        except Exception as e:
+            messagebox.showerror("错误", f"删除音频预设失败: {str(e)}")
+            self.log_message(f"删除音频预设失败: {str(e)}")
 
     def on_audio_effect_selected(self, event=None):
         self.updating_audio_controls = True

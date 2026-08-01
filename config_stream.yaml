@@ -1,161 +1,502 @@
 streamer:
   sources:
-    - type: "demo" # 基础示例
-      id: 'demo1'
-
-    - type: "audio_visualization"
-      id: 'audio_visual1'
-      params:
-        # 输入分析参数与画面效果彻底分开。
-        input:
-          gain: 1.0
-          noise_gate: 0.0015
-          beat_sensitivity: 1.25
-
-        # 每个效果拥有独立开关和 params；新增/删除效果无需修改 UI。
-        effects:
-          waveform:
-            enabled: false
-            params:
-              amplitude: 0.82
-              thickness: 2
-              smoothing: 0.58
-              glow: 0.85
-              hue_speed: 0.28
-          spectrum_bars:
-            enabled: true
-            params:
-              bars: 32
-              height: 0.72
-              smoothing: 0.76
-              gap: 2
-              glow: 0.72
-          orbital_rings:
-            enabled: false
-            params:
-              radius: 50
-              spread: 9
-              response: 21
-              rotation: 0.18
-              smoothing: 0.72
-          chroma_ring:
-            enabled: false
-            params:
-              radius: 54
-              length: 29
-              thickness: 2
-              smoothing: 0.68
-              hue: 118
-          pulse_tunnel:
-            enabled: false
-            params:
-              rings: 6
-              spacing: 13
-              pulse: 13
-              smoothing: 0.78
-              speed: 0.65
-              thickness: 2
-          mirror_bars:
-            enabled: false
-            params:
-              bars: 36
-              height: 0.39
-              smoothing: 0.79
-              glow: 0.9
-              hue: 140
-          aurora:
-            enabled: false
-            params:
-              layers: 4
-              height: 0.48
-              flow: 0.32
-              smoothing: 0.86
-              glow: 0.82
-          starburst:
-            enabled: false
-            params:
-              spokes: 64
-              radius: 35
-              length: 54
-              rotation: 0.22
-              smoothing: 0.7
-          waterfall:
-            enabled: false
-            params:
-              bands: 64
-              speed: 2
-              brightness: 1.15
-              smoothing: 0.62
-              blend: 0.76
-          particles:
-            enabled: true
-            params:
-              count: 120
-              spawn: 0.8
-              speed: 1.0
-              size: 3.2
-              drift: 0.65
-
-
-
-    - type: "video_file" # 本地视频文件
-      id: "video_player"
-      enable: True
-      params:
-#        video_path: 'I:\genshin_video\character_show'
-        video_path: 'sample_video'
-        auto_play_next: True # 是否自动循环播放全部视频
-        auto_crop_center: True # 是否自动裁边居中
-        random_play: True # 是否开启乱序循环播放
-#        first_play_video: 'xinhai.mp4'  # 指定第一个播放的视频
-        fps: 30
-    - type: "screen" # 区域截图
-      id: "window_region"
-      params:
-        display_idx: 0
-        fps: 30
-        region: [684, 330, 300, 300]
-        use_mss: False
-    - type: "screen"  # 全屏截图
-      id: "window_fullscreen"
-      params:
-        display_idx: 0
-        fps: 30
-        use_mss: False
-    - type: "screen"  # 按窗口截图
-      id: "yuanshen"
-      params:
-        window_title: '原神'
-        display_idx: 0
-        fps: 30
-        use_mss: False
-        remove_title_bar: True
-    - type: "screen"  # 按窗口截图（use_mss=True兼容模式)
-      id: "zzz"
-      params:
-        window_title: '绝区零'
-        display_idx: 0
-        fps: 30
-        use_mss: True
-
-    - type: "camera" # 相机
-      id: "webcam"
-      enable: false
-      params:
-        camera_idx: 0
-        resolution: [1280, 720]
-        fps: 25
-
-    - type: "rtsp" #rtsp
-      id: "my_mobile_phone_rtsp_camera"
-      enable: false
-      params:
-        rtsp_url: "rtsp://admin:admin@192.168.30.134:8554/live"
-        buffer_size: 5000
-        timeout: 3
-
-#  active_source: "yuanshen"
-  active_source: "audio_visual1"
-#  active_source: "window_region"
-  stream_url: "rtmp://server/live/stream"
+  - type: demo
+    id: demo1
+  - type: audio_visualization
+    id: audio_visual1
+    params:
+      input:
+        gain: 1.0
+        noise_gate: 0.0015
+        beat_sensitivity: 1.25
+      effects:
+        waveform:
+          enabled: false
+          params:
+            amplitude: 1.25
+            thickness: 2
+            smoothing: 0.6
+            glow: 0.85
+            hue_speed: 0.3
+        spectrum_bars:
+          enabled: false
+          params:
+            bars: 16
+            height: 0.7
+            smoothing: 0.76
+            gap: 2
+            glow: 0.7
+        orbital_rings:
+          enabled: false
+          params:
+            radius: 50
+            spread: 9
+            response: 21
+            rotation: 0.2
+            smoothing: 0.72
+        chroma_ring:
+          enabled: false
+          params:
+            radius: 72
+            length: 28
+            thickness: 2
+            smoothing: 0.64
+            hue: 120
+        pulse_tunnel:
+          enabled: true
+          params:
+            rings: 10
+            spacing: 24
+            pulse: 13
+            smoothing: 0.78
+            speed: 0.65
+            thickness: 2
+        mirror_bars:
+          enabled: false
+          params:
+            bars: 20
+            height: 0.39
+            smoothing: 0.8
+            glow: 0.9
+            hue: 140
+        aurora:
+          enabled: false
+          params:
+            layers: 5
+            height: 0.6
+            flow: 0.8
+            smoothing: 0.87
+            glow: 1.0
+        starburst:
+          enabled: true
+          params:
+            spokes: 120
+            radius: 46
+            length: 72
+            rotation: 0.22
+            smoothing: 0.7
+        waterfall:
+          enabled: false
+          params:
+            bands: 56
+            speed: 2
+            brightness: 1.2
+            smoothing: 0.6
+            blend: 0.7
+        particles:
+          enabled: true
+          params:
+            count: 120
+            spawn: 0.8
+            speed: 1.0
+            size: 3.2
+            drift: 0.65
+      presets:
+        波形-粒子:
+          input:
+            gain: 1.0
+            noise_gate: 0.0015
+            beat_sensitivity: 1.25
+          effects:
+            waveform:
+              enabled: true
+              params:
+                amplitude: 1.25
+                thickness: 2
+                smoothing: 0.6
+                glow: 0.85
+                hue_speed: 0.3
+            spectrum_bars:
+              enabled: false
+              params:
+                bars: 16
+                height: 0.7
+                smoothing: 0.76
+                gap: 2
+                glow: 0.7
+            orbital_rings:
+              enabled: false
+              params:
+                radius: 50
+                spread: 9
+                response: 21
+                rotation: 0.2
+                smoothing: 0.72
+            chroma_ring:
+              enabled: false
+              params:
+                radius: 54
+                length: 28
+                thickness: 2
+                smoothing: 0.68
+                hue: 120
+            pulse_tunnel:
+              enabled: false
+              params:
+                rings: 10
+                spacing: 24
+                pulse: 13
+                smoothing: 0.8
+                speed: 0.95
+                thickness: 3
+            mirror_bars:
+              enabled: false
+              params:
+                bars: 20
+                height: 0.39
+                smoothing: 0.8
+                glow: 0.9
+                hue: 140
+            aurora:
+              enabled: false
+              params:
+                layers: 5
+                height: 0.6
+                flow: 0.8
+                smoothing: 0.87
+                glow: 1.0
+            starburst:
+              enabled: false
+              params:
+                spokes: 64
+                radius: 36
+                length: 54
+                rotation: 0.2
+                smoothing: 0.72
+            waterfall:
+              enabled: false
+              params:
+                bands: 56
+                speed: 2
+                brightness: 1.2
+                smoothing: 0.6
+                blend: 0.7
+            particles:
+              enabled: true
+              params:
+                count: 120
+                spawn: 0.8
+                speed: 1.0
+                size: 3.2
+                drift: 0.65
+        频谱-粒子:
+          input:
+            gain: 1.0
+            noise_gate: 0.0015
+            beat_sensitivity: 1.25
+          effects:
+            waveform:
+              enabled: false
+              params:
+                amplitude: 1.25
+                thickness: 2
+                smoothing: 0.6
+                glow: 0.85
+                hue_speed: 0.3
+            spectrum_bars:
+              enabled: true
+              params:
+                bars: 16
+                height: 0.7
+                smoothing: 0.76
+                gap: 2
+                glow: 0.7
+            orbital_rings:
+              enabled: false
+              params:
+                radius: 50
+                spread: 9
+                response: 21
+                rotation: 0.2
+                smoothing: 0.72
+            chroma_ring:
+              enabled: false
+              params:
+                radius: 54
+                length: 28
+                thickness: 2
+                smoothing: 0.68
+                hue: 120
+            pulse_tunnel:
+              enabled: false
+              params:
+                rings: 10
+                spacing: 24
+                pulse: 13
+                smoothing: 0.8
+                speed: 0.95
+                thickness: 3
+            mirror_bars:
+              enabled: false
+              params:
+                bars: 20
+                height: 0.39
+                smoothing: 0.8
+                glow: 0.9
+                hue: 140
+            aurora:
+              enabled: false
+              params:
+                layers: 5
+                height: 0.6
+                flow: 0.8
+                smoothing: 0.87
+                glow: 1.0
+            starburst:
+              enabled: false
+              params:
+                spokes: 64
+                radius: 36
+                length: 54
+                rotation: 0.2
+                smoothing: 0.72
+            waterfall:
+              enabled: false
+              params:
+                bands: 56
+                speed: 2
+                brightness: 1.2
+                smoothing: 0.6
+                blend: 0.7
+            particles:
+              enabled: true
+              params:
+                count: 120
+                spawn: 0.8
+                speed: 1.0
+                size: 3.2
+                drift: 0.65
+        极光:
+          input:
+            gain: 1.0
+            noise_gate: 0.0015
+            beat_sensitivity: 1.25
+          effects:
+            waveform:
+              enabled: false
+              params:
+                amplitude: 1.25
+                thickness: 2
+                smoothing: 0.6
+                glow: 0.85
+                hue_speed: 0.3
+            spectrum_bars:
+              enabled: false
+              params:
+                bars: 16
+                height: 0.7
+                smoothing: 0.76
+                gap: 2
+                glow: 0.7
+            orbital_rings:
+              enabled: false
+              params:
+                radius: 50
+                spread: 9
+                response: 21
+                rotation: 0.2
+                smoothing: 0.72
+            chroma_ring:
+              enabled: false
+              params:
+                radius: 72
+                length: 28
+                thickness: 2
+                smoothing: 0.64
+                hue: 120
+            pulse_tunnel:
+              enabled: false
+              params:
+                rings: 10
+                spacing: 24
+                pulse: 13
+                smoothing: 0.8
+                speed: 0.95
+                thickness: 3
+            mirror_bars:
+              enabled: false
+              params:
+                bars: 20
+                height: 0.39
+                smoothing: 0.8
+                glow: 0.9
+                hue: 140
+            aurora:
+              enabled: true
+              params:
+                layers: 5
+                height: 0.6
+                flow: 0.8
+                smoothing: 0.87
+                glow: 1.0
+            starburst:
+              enabled: false
+              params:
+                spokes: 64
+                radius: 36
+                length: 54
+                rotation: 0.2
+                smoothing: 0.72
+            waterfall:
+              enabled: false
+              params:
+                bands: 56
+                speed: 2
+                brightness: 1.2
+                smoothing: 0.6
+                blend: 0.7
+            particles:
+              enabled: true
+              params:
+                count: 120
+                spawn: 0.8
+                speed: 1.0
+                size: 3.2
+                drift: 0.65
+        星芒脉冲:
+          input:
+            gain: 1.0
+            noise_gate: 0.0015
+            beat_sensitivity: 1.25
+          effects:
+            waveform:
+              enabled: false
+              params:
+                amplitude: 1.25
+                thickness: 2
+                smoothing: 0.6
+                glow: 0.85
+                hue_speed: 0.3
+            spectrum_bars:
+              enabled: false
+              params:
+                bars: 16
+                height: 0.7
+                smoothing: 0.76
+                gap: 2
+                glow: 0.7
+            orbital_rings:
+              enabled: false
+              params:
+                radius: 50
+                spread: 9
+                response: 21
+                rotation: 0.2
+                smoothing: 0.72
+            chroma_ring:
+              enabled: false
+              params:
+                radius: 72
+                length: 28
+                thickness: 2
+                smoothing: 0.64
+                hue: 120
+            pulse_tunnel:
+              enabled: true
+              params:
+                rings: 10
+                spacing: 24
+                pulse: 13
+                smoothing: 0.78
+                speed: 0.65
+                thickness: 2
+            mirror_bars:
+              enabled: false
+              params:
+                bars: 20
+                height: 0.39
+                smoothing: 0.8
+                glow: 0.9
+                hue: 140
+            aurora:
+              enabled: false
+              params:
+                layers: 5
+                height: 0.6
+                flow: 0.8
+                smoothing: 0.87
+                glow: 1.0
+            starburst:
+              enabled: true
+              params:
+                spokes: 64
+                radius: 46
+                length: 52
+                rotation: 0.22
+                smoothing: 0.7
+            waterfall:
+              enabled: false
+              params:
+                bands: 56
+                speed: 2
+                brightness: 1.2
+                smoothing: 0.6
+                blend: 0.7
+            particles:
+              enabled: true
+              params:
+                count: 120
+                spawn: 0.8
+                speed: 1.0
+                size: 3.2
+                drift: 0.65
+  - type: video_file
+    id: video_player
+    enable: true
+    params:
+      video_path: sample_video
+      auto_play_next: true
+      auto_crop_center: true
+      random_play: true
+      fps: 30
+  - type: screen
+    id: window_region
+    params:
+      display_idx: 0
+      fps: 30
+      region:
+      - 684
+      - 330
+      - 300
+      - 300
+      use_mss: false
+  - type: screen
+    id: window_fullscreen
+    params:
+      display_idx: 0
+      fps: 30
+      use_mss: false
+  - type: screen
+    id: yuanshen
+    params:
+      window_title: 原神
+      display_idx: 0
+      fps: 30
+      use_mss: false
+      remove_title_bar: true
+  - type: screen
+    id: zzz
+    params:
+      window_title: 绝区零
+      display_idx: 0
+      fps: 30
+      use_mss: true
+  - type: camera
+    id: webcam
+    enable: false
+    params:
+      camera_idx: 0
+      resolution:
+      - 1280
+      - 720
+      fps: 25
+  - type: rtsp
+    id: my_mobile_phone_rtsp_camera
+    enable: false
+    params:
+      rtsp_url: rtsp://admin:admin@192.168.30.134:8554/live
+      buffer_size: 5000
+      timeout: 3
+  active_source: audio_visual1
+  stream_url: rtmp://server/live/stream
   bitrate: 2500000
