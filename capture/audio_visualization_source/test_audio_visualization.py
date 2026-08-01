@@ -5,6 +5,7 @@ import numpy as np
 from capture.audio_visualization_source.audio_visualization import AudioVisualizer
 from capture.audio_visualization_source.audio_visualization_source import AudioVisualizationSource
 from capture.audio_visualization_source.effects.base import AudioFrame
+from capture.audio_visualization_source.effects.ionized_ring import IonizedRingEffect
 from capture.audio_visualization_source.effects.pulse_tunnel import PulseTunnelEffect
 from capture.interface import SourceType
 
@@ -22,8 +23,8 @@ class AudioVisualizationTests(unittest.TestCase):
 
     def test_every_registered_effect_renders_independently(self):
         catalog = self.visualizer.effect_catalog()
-        self.assertEqual(10, len(catalog))
-        self.assertEqual(10, len({item["id"] for item in catalog}))
+        self.assertEqual(11, len(catalog))
+        self.assertEqual(11, len({item["id"] for item in catalog}))
         for effect_id, effect in self.visualizer.effects.items():
             for candidate in self.visualizer.effects.values():
                 candidate.enabled = False
@@ -40,16 +41,44 @@ class AudioVisualizationTests(unittest.TestCase):
         self.assertEqual(0.2, self.visualizer.effects["spectrum_bars"].values["smoothing"])
         self.assertEqual(original_waveform, self.visualizer.effects["waveform"].values)
 
+    def test_ionized_ring_adds_red_and_blue_layers_on_a_beat(self):
+        effect = IonizedRingEffect()
+        effect.rng = np.random.default_rng(7)
+        canvas = np.zeros((240, 240, 3), dtype=np.uint8)
+        frame = AudioFrame(
+            waveform=np.zeros(1024, dtype=np.float32),
+            spectrum=np.linspace(0.1, 1.0, 513, dtype=np.float32),
+            sample_rate=48000,
+            block_size=1024,
+            rms=0.2,
+            bass=0.8,
+            beat=1.0,
+            time=0.0,
+        )
+
+        effect.draw(canvas, frame, 1.0 / 30.0)
+
+        channels = canvas.astype(np.int16)
+        blue_pixels = (channels[:, :, 0] > channels[:, :, 2] + 20).sum()
+        red_pixels = (channels[:, :, 2] > channels[:, :, 0] + 20).sum()
+        self.assertGreater(blue_pixels, 0)
+        self.assertGreater(red_pixels, 0)
+
     def test_legacy_flat_config_is_migrated(self):
         source = AudioVisualizationSource(SourceType.AUDIO_VISUALIZATION, "test")
         source.visualizer = self.visualizer
         self.assertTrue(source.set_config({
             "draw_waveform": True,
+            "draw_spectrum_circular2": True,
             "gain": 1.4,
+            "radius_smoothing": 0.8,
             "max_particles": 80,
         }))
         config = source.get_info()["config"]
         self.assertTrue(config["effects"]["waveform"]["enabled"])
+        self.assertTrue(config["effects"]["ionized_ring"]["enabled"])
+        self.assertFalse(config["effects"]["chroma_ring"]["enabled"])
+        self.assertEqual(0.8, config["effects"]["ionized_ring"]["params"]["pulse_smoothing"])
         self.assertEqual(80, config["effects"]["particles"]["params"]["count"])
         self.assertEqual(1.4, config["input"]["gain"])
         source.visualizer = None

@@ -16,7 +16,7 @@ class AudioVisualizationSource(ImageSourceInterface):
         "draw_waveform": "waveform",
         "draw_spectrum_bar": "spectrum_bars",
         "draw_spectrum_circular1": "orbital_rings",
-        "draw_spectrum_circular2": "chroma_ring",
+        "draw_spectrum_circular2": "ionized_ring",
         "draw_spectrum_circular3": "pulse_tunnel",
         "draw_neon_mirror": "mirror_bars",
         "draw_aurora": "aurora",
@@ -105,14 +105,14 @@ class AudioVisualizationSource(ImageSourceInterface):
         smoothing = config.get("spectrum_smoothing")
         if smoothing is not None:
             for effect_id in (
-                "waveform", "spectrum_bars", "orbital_rings", "chroma_ring",
+                "waveform", "spectrum_bars", "orbital_rings", "chroma_ring", "ionized_ring",
                 "mirror_bars", "aurora", "starburst", "waterfall",
             ):
                 effects_config.setdefault(effect_id, {}).setdefault("params", {}).setdefault(
                     "smoothing", smoothing
                 )
         if "base_radius" in config:
-            for effect_id in ("orbital_rings", "chroma_ring"):
+            for effect_id in ("orbital_rings", "chroma_ring", "ionized_ring"):
                 effects_config.setdefault(effect_id, {}).setdefault("params", {}).setdefault(
                     "radius", config["base_radius"]
                 )
@@ -122,6 +122,13 @@ class AudioVisualizationSource(ImageSourceInterface):
             )
             effects_config.setdefault("chroma_ring", {}).setdefault("params", {}).setdefault(
                 "length", config["radius_expansion"]
+            )
+            effects_config.setdefault("ionized_ring", {}).setdefault("params", {}).setdefault(
+                "separation", config["radius_expansion"]
+            )
+        if "radius_smoothing" in config:
+            effects_config.setdefault("ionized_ring", {}).setdefault("params", {}).setdefault(
+                "pulse_smoothing", config["radius_smoothing"]
             )
         if "max_particles" in config:
             effects_config.setdefault("particles", {}).setdefault("params", {}).setdefault(

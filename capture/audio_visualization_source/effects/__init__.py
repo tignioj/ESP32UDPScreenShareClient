@@ -3,6 +3,7 @@
 from .aurora import AuroraEffect
 from .base import AudioEffect, ParameterSpec, metadata_for
 from .chroma_ring import ChromaRingEffect
+from .ionized_ring import IonizedRingEffect
 from .mirror_bars import MirrorBarsEffect
 from .orbital_rings import OrbitalRingsEffect
 from .particles import ParticlesEffect
@@ -18,6 +19,7 @@ EFFECT_TYPES = (
     SpectrumBarsEffect,
     OrbitalRingsEffect,
     ChromaRingEffect,
+    IonizedRingEffect,
     PulseTunnelEffect,
     MirrorBarsEffect,
     AuroraEffect,

@@ -42,6 +42,16 @@ streamer:
             thickness: 2
             smoothing: 0.64
             hue: 120
+        ionized_ring:
+          enabled: false
+          params:
+            radius: 60
+            response: 46
+            separation: 22
+            thickness: 4
+            smoothing: 0.62
+            pulse_smoothing: 0.9
+            glow: 0.7
         pulse_tunnel:
           enabled: true
           params:
@@ -130,6 +140,16 @@ streamer:
                 thickness: 2
                 smoothing: 0.68
                 hue: 120
+            ionized_ring:
+              enabled: false
+              params:
+                radius: 60
+                response: 46
+                separation: 22
+                thickness: 4
+                smoothing: 0.62
+                pulse_smoothing: 0.9
+                glow: 0.7
             pulse_tunnel:
               enabled: false
               params:
@@ -217,6 +237,16 @@ streamer:
                 thickness: 2
                 smoothing: 0.68
                 hue: 120
+            ionized_ring:
+              enabled: false
+              params:
+                radius: 60
+                response: 46
+                separation: 22
+                thickness: 4
+                smoothing: 0.62
+                pulse_smoothing: 0.9
+                glow: 0.7
             pulse_tunnel:
               enabled: false
               params:
@@ -304,6 +334,16 @@ streamer:
                 thickness: 2
                 smoothing: 0.64
                 hue: 120
+            ionized_ring:
+              enabled: false
+              params:
+                radius: 60
+                response: 46
+                separation: 22
+                thickness: 4
+                smoothing: 0.62
+                pulse_smoothing: 0.9
+                glow: 0.7
             pulse_tunnel:
               enabled: false
               params:
@@ -391,6 +431,16 @@ streamer:
                 thickness: 2
                 smoothing: 0.64
                 hue: 120
+            ionized_ring:
+              enabled: false
+              params:
+                radius: 60
+                response: 46
+                separation: 22
+                thickness: 4
+                smoothing: 0.62
+                pulse_smoothing: 0.9
+                glow: 0.7
             pulse_tunnel:
               enabled: true
               params:
