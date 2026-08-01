@@ -8,6 +8,7 @@ import threading
 import time
 import sys
 from tkinter import scrolledtext
+import tkinter.font as tkfont
 
 # 尝试导入UDP发送相关的模块
 try:
@@ -157,6 +158,7 @@ class YAMLConfigEditor:
         self.video_list_items = {}
         self.video_list_signature = ()
         self.video_preview_image = None
+        self.video_preview_size = (360, 240)
         self.video_refresh_job = None
         self.video_idle_playback_job = None
         self.updating_video_controls = False
@@ -495,7 +497,20 @@ class YAMLConfigEditor:
         list_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 8))
         list_frame.columnconfigure(0, weight=1)
         list_frame.rowconfigure(0, weight=1)
-        self.video_list = ttk.Treeview(list_frame, show='tree', height=7, selectmode='browse')
+        tree_style = ttk.Style(self.root)
+        tree_font = tree_style.lookup('Treeview', 'font') or 'TkDefaultFont'
+        tree_line_height = tkfont.Font(root=self.root, font=tree_font).metrics('linespace')
+        tree_style.configure(
+            'Video.Treeview',
+            rowheight=max(24, tree_line_height + 6),
+        )
+        self.video_list = ttk.Treeview(
+            list_frame,
+            show='tree',
+            height=7,
+            selectmode='browse',
+            style='Video.Treeview',
+        )
         self.video_list.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         video_list_scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.video_list.yview)
         video_list_scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
@@ -504,15 +519,20 @@ class YAMLConfigEditor:
 
         self.video_preview_frame = ttk.LabelFrame(video_content, text="播放预览", padding=4)
         self.video_preview_frame.grid(row=0, column=1, sticky=(tk.N, tk.E))
-        self.video_preview_label = tk.Label(
+        preview_surface = ttk.Frame(
             self.video_preview_frame,
+            width=self.video_preview_size[0],
+            height=self.video_preview_size[1],
+        )
+        preview_surface.pack()
+        preview_surface.pack_propagate(False)
+        self.video_preview_label = tk.Label(
+            preview_surface,
             text="等待视频画面",
             bg="#111111",
             fg="#dddddd",
-            width=32,
-            height=10,
         )
-        self.video_preview_label.pack()
+        self.video_preview_label.pack(fill=tk.BOTH, expand=True)
         ttk.Button(
             self.video_preview_frame,
             text="关闭预览",
@@ -1133,7 +1153,11 @@ class YAMLConfigEditor:
             self.video_preview_image = None
             return
         height, width = frame.shape[:2]
-        scale = min(240 / max(width, 1), 160 / max(height, 1))
+        preview_width_limit, preview_height_limit = self.video_preview_size
+        scale = min(
+            preview_width_limit / max(width, 1),
+            preview_height_limit / max(height, 1),
+        )
         preview_width = max(1, int(width * scale))
         preview_height = max(1, int(height * scale))
         preview = cv2.resize(frame, (preview_width, preview_height), interpolation=cv2.INTER_AREA)
