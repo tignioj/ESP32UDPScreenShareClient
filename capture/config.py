@@ -177,6 +177,9 @@ def save_source_runtime_config(
     document = _load_stream_config(path)
     source = _find_audio_source(document, source_id)
     source['params'].update(values)
+    # Saving raw runtime values means the source should resume these custom
+    # values instead of re-applying an older named preset on next startup.
+    source['params'].pop('active_preset', None)
     return _write_stream_config(path, document)
 
 
@@ -223,11 +226,52 @@ def load_audio_presets(
     return copy.deepcopy(presets)
 
 
+def load_active_audio_preset(
+    source_id: str,
+    config_path: Optional[os.PathLike] = None,
+) -> Optional[str]:
+    """Load the named preset that an audio source should restore at startup."""
+    if not source_id:
+        raise ValueError("图像源 ID 不能为空")
+    path = Path(config_path) if config_path is not None else get_stream_config_path()
+    source = _find_audio_source(_load_stream_config(path), source_id)
+    name = source['params'].get('active_preset')
+    presets = source['params'].get('presets', {})
+    if name is None:
+        return None
+    if not isinstance(name, str) or not isinstance(presets, dict) or name not in presets:
+        return None
+    return name
+
+
+def save_active_audio_preset(
+    source_id: str,
+    preset_name: str,
+    config_path: Optional[os.PathLike] = None,
+) -> Path:
+    """Persist the preset selection for one audio source."""
+    name = preset_name.strip() if isinstance(preset_name, str) else ''
+    if not name:
+        raise ValueError("预设名称不能为空")
+    path = Path(config_path) if config_path is not None else get_stream_config_path()
+    document = _load_stream_config(path)
+    source = _find_audio_source(document, source_id)
+    presets = source['params'].get('presets', {})
+    if not isinstance(presets, dict):
+        raise ValueError(f"图像源 {source_id} 的 presets 必须是对象")
+    if name not in presets:
+        raise ValueError(f"找不到音频预设: {name}")
+    source['params']['active_preset'] = name
+    return _write_stream_config(path, document)
+
+
 def save_audio_preset(
     source_id: str,
     preset_name: str,
     runtime_config: Dict[str, Any],
     config_path: Optional[os.PathLike] = None,
+    *,
+    make_active: bool = False,
 ) -> Path:
     """Save or overwrite a named audio effect combination."""
     name = preset_name.strip() if isinstance(preset_name, str) else ''
@@ -243,6 +287,8 @@ def save_audio_preset(
     if not isinstance(presets, dict):
         raise ValueError(f"图像源 {source_id} 的 presets 必须是对象")
     presets[name] = values
+    if make_active:
+        source['params']['active_preset'] = name
     return _write_stream_config(path, document)
 
 
@@ -261,6 +307,8 @@ def delete_audio_preset(
     if preset_name not in presets:
         raise ValueError(f"找不到音频预设: {preset_name}")
     del presets[preset_name]
+    if source['params'].get('active_preset') == preset_name:
+        source['params'].pop('active_preset', None)
     return _write_stream_config(path, document)
 
 

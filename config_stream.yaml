@@ -490,6 +490,104 @@ streamer:
                 speed: 1.0
                 size: 3.2
                 drift: 0.65
+        多柱无缝频谱-粒子:
+          input:
+            gain: 1.0
+            noise_gate: 0.0015
+            beat_sensitivity: 1.25
+          effects:
+            waveform:
+              enabled: false
+              params:
+                amplitude: 1.25
+                thickness: 2
+                smoothing: 0.6
+                glow: 0.85
+                hue_speed: 0.3
+            spectrum_bars:
+              enabled: true
+              params:
+                bars: 64
+                height: 0.7
+                smoothing: 0.76
+                gap: 0
+                glow: 0.65
+            orbital_rings:
+              enabled: false
+              params:
+                radius: 50
+                spread: 9
+                response: 21
+                rotation: 0.2
+                smoothing: 0.72
+            chroma_ring:
+              enabled: false
+              params:
+                radius: 54
+                length: 28
+                thickness: 2
+                smoothing: 0.68
+                hue: 120
+            ionized_ring:
+              enabled: false
+              params:
+                radius: 60
+                response: 46
+                separation: 22
+                thickness: 4
+                smoothing: 0.64
+                pulse_smoothing: 0.9
+                glow: 0.7
+            pulse_tunnel:
+              enabled: false
+              params:
+                rings: 10
+                spacing: 24
+                pulse: 13
+                smoothing: 0.8
+                speed: 0.95
+                thickness: 3
+            mirror_bars:
+              enabled: false
+              params:
+                bars: 20
+                height: 0.39
+                smoothing: 0.8
+                glow: 0.9
+                hue: 140
+            aurora:
+              enabled: false
+              params:
+                layers: 5
+                height: 0.6
+                flow: 0.8
+                smoothing: 0.87
+                glow: 1.0
+            starburst:
+              enabled: false
+              params:
+                spokes: 64
+                radius: 36
+                length: 54
+                rotation: 0.2
+                smoothing: 0.72
+            waterfall:
+              enabled: false
+              params:
+                bands: 56
+                speed: 2
+                brightness: 1.2
+                smoothing: 0.6
+                blend: 0.7
+            particles:
+              enabled: true
+              params:
+                count: 120
+                spawn: 0.8
+                speed: 1.0
+                size: 3.2
+                drift: 0.65
+      active_preset: 多柱无缝频谱-粒子
   - type: video_file
     id: video_player
     enable: true

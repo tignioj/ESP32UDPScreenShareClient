@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
@@ -82,6 +83,49 @@ class AudioVisualizationTests(unittest.TestCase):
         self.assertEqual(80, config["effects"]["particles"]["params"]["count"])
         self.assertEqual(1.4, config["input"]["gain"])
         source.visualizer = None
+
+    def test_resolves_the_active_preset_for_startup(self):
+        config = {
+            "active_preset": "派对",
+            "presets": {
+                "舒缓": {"input": {"gain": 0.8}},
+                "派对": {"input": {"gain": 1.8}},
+            },
+        }
+
+        resolved = AudioVisualizationSource._get_active_preset_config(config)
+        self.assertEqual({"input": {"gain": 1.8}}, resolved)
+        config["presets"]["派对"]["input"]["gain"] = 2.0
+        self.assertEqual({"input": {"gain": 1.8}}, resolved)
+
+    def test_ignores_a_stale_active_preset_at_startup(self):
+        self.assertIsNone(AudioVisualizationSource._get_active_preset_config({
+            "active_preset": "已删除",
+            "presets": {},
+        }))
+
+    @patch("capture.audio_visualization_source.audio_visualization_source.AudioVisualizer")
+    def test_initialize_applies_the_saved_preset_after_base_values(self, visualizer_type):
+        source = AudioVisualizationSource(SourceType.AUDIO_VISUALIZATION, "test")
+        visualizer = visualizer_type.return_value
+
+        self.assertTrue(source.initialize(
+            input={"gain": 1.0},
+            effects={"waveform": {"enabled": False}},
+            active_preset="派对",
+            presets={
+                "派对": {
+                    "input": {"gain": 1.8},
+                    "effects": {"waveform": {"enabled": True}},
+                },
+            },
+        ))
+
+        self.assertEqual(2, visualizer.configure.call_count)
+        self.assertEqual({"input": {"gain": 1.0}, "effects": {"waveform": {"enabled": False}}},
+                         visualizer.configure.call_args_list[0].args[0])
+        self.assertEqual({"input": {"gain": 1.8}, "effects": {"waveform": {"enabled": True}}},
+                         visualizer.configure.call_args_list[1].args[0])
 
     def test_pulse_tunnel_is_continuous_across_phase_wrap(self):
         effect = PulseTunnelEffect()

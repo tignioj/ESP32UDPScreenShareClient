@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import threading
 from typing import Any, Dict, List, Optional
 
@@ -49,6 +50,9 @@ class AudioVisualizationSource(ImageSourceInterface):
             config = self._translate_config(kwargs)
             if config:
                 self.visualizer.configure(config)
+            active_preset = self._get_active_preset_config(kwargs)
+            if active_preset:
+                self.visualizer.configure(self._translate_config(active_preset))
             return True
         except Exception as exc:
             if self.visualizer is not None:
@@ -56,6 +60,16 @@ class AudioVisualizationSource(ImageSourceInterface):
                 self.visualizer = None
             print(f"音频可视化初始化失败: {exc}")
             return False
+
+    @staticmethod
+    def _get_active_preset_config(config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Resolve a valid saved selection without letting stale YAML break startup."""
+        name = config.get("active_preset")
+        presets = config.get("presets")
+        if not isinstance(name, str) or not isinstance(presets, dict):
+            return None
+        preset = presets.get(name)
+        return copy.deepcopy(preset) if isinstance(preset, dict) else None
 
     def capture(self) -> Optional[np.ndarray]:
         with self._config_lock:

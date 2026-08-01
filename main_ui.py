@@ -19,7 +19,9 @@ try:
     from capture.config import (
         delete_audio_preset,
         get_streamer,
+        load_active_audio_preset,
         load_audio_presets,
+        save_active_audio_preset,
         save_audio_preset,
         save_source_runtime_config,
         save_video_source_config,
@@ -652,6 +654,7 @@ class YAMLConfigEditor:
             width=24,
         )
         self.audio_preset_combo.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(6, 8))
+        self.audio_preset_combo.bind("<<ComboboxSelected>>", self.on_audio_preset_selected)
         audio_preset_buttons = ttk.Frame(audio_preset_frame)
         audio_preset_buttons.grid(row=1, column=1, sticky=tk.W, pady=(6, 0))
         ttk.Button(
@@ -669,6 +672,11 @@ class YAMLConfigEditor:
             text="删除",
             command=self.delete_selected_audio_preset,
         ).pack(side=tk.LEFT)
+        ttk.Label(
+            audio_preset_frame,
+            text="选择后会立即应用并记住，下次启动自动恢复。",
+            foreground="#666666",
+        ).grid(row=2, column=1, sticky=tk.W, pady=(5, 0))
 
         self.audio_controls_frame.grid_remove()
 
@@ -1405,8 +1413,8 @@ class YAMLConfigEditor:
             self.audio_presets = load_audio_presets(source_id) if source_id else {}
             names = list(self.audio_presets)
             self.audio_preset_combo.configure(values=names)
-            if self.audio_preset_var.get() not in self.audio_presets:
-                self.audio_preset_var.set(names[0] if names else "")
+            active_name = load_active_audio_preset(source_id) if source_id else None
+            self.audio_preset_var.set(active_name or (names[0] if names else ""))
         except Exception as e:
             self.audio_presets = {}
             self.audio_preset_combo.configure(values=())
@@ -1439,7 +1447,7 @@ class YAMLConfigEditor:
 
         try:
             runtime_config = streamer.get_source_info(source_id).get('config', {})
-            save_audio_preset(source_id, name, runtime_config)
+            save_audio_preset(source_id, name, runtime_config, make_active=True)
             self.refresh_audio_presets(source_id)
             self.audio_preset_var.set(name)
             self.log_message(f"音频组合预设已保存: {name}")
@@ -1462,6 +1470,7 @@ class YAMLConfigEditor:
                 raise ValueError(f"找不到音频预设: {name}")
             if not streamer.set_source_config(preset, source_id):
                 raise ValueError("预设中包含无效或超出范围的参数")
+            save_active_audio_preset(source_id, name)
             self.audio_presets = presets
             self.refresh_audio_controls()
             self.audio_preset_var.set(name)
@@ -1471,6 +1480,10 @@ class YAMLConfigEditor:
             messagebox.showerror("错误", f"应用音频预设失败: {str(e)}")
             self.log_message(f"应用音频预设失败: {str(e)}")
             self.refresh_audio_presets(source_id)
+
+    def on_audio_preset_selected(self, event=None):
+        """选择效果预设后立即应用，并记住每个音频源的选择。"""
+        self.apply_audio_preset()
 
     def delete_selected_audio_preset(self):
         """删除当前选中的命名效果组合。"""

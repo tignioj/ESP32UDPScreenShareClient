@@ -6,7 +6,9 @@ import yaml
 
 from capture.config import (
     delete_audio_preset,
+    load_active_audio_preset,
     load_audio_presets,
+    save_active_audio_preset,
     save_audio_preset,
     save_source_runtime_config,
     save_video_source_config,
@@ -127,6 +129,41 @@ class ConfigPersistenceTests(unittest.TestCase):
             save_source_runtime_config("audio_one", current, path)
 
             self.assertEqual({"保留我": preset}, load_audio_presets("audio_one", path))
+
+    def test_remembers_active_audio_preset_and_clears_it_for_custom_values(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write_config(directory)
+            preset = {
+                "input": {"gain": 1.5},
+                "effects": {"waveform": {"enabled": True}},
+            }
+            save_audio_preset("audio_one", "现场", preset, path, make_active=True)
+
+            self.assertEqual("现场", load_active_audio_preset("audio_one", path))
+
+            save_source_runtime_config(
+                "audio_one",
+                {"input": {"gain": 0.9}, "effects": {"waveform": {"enabled": False}}},
+                path,
+            )
+            self.assertIsNone(load_active_audio_preset("audio_one", path))
+
+    def test_active_audio_preset_must_exist_and_is_cleared_when_deleted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write_config(directory)
+            preset = {
+                "input": {"gain": 0.8},
+                "effects": {"waveform": {"enabled": True}},
+            }
+            save_audio_preset("audio_one", "舒缓", preset, path)
+            save_active_audio_preset("audio_one", "舒缓", path)
+            self.assertEqual("舒缓", load_active_audio_preset("audio_one", path))
+
+            delete_audio_preset("audio_one", "舒缓", path)
+            self.assertIsNone(load_active_audio_preset("audio_one", path))
+
+            with self.assertRaisesRegex(ValueError, "找不到音频预设"):
+                save_active_audio_preset("audio_one", "不存在", path)
 
     def test_saves_video_playback_parameters_and_current_video(self):
         with tempfile.TemporaryDirectory() as directory:
