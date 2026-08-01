@@ -1,5 +1,6 @@
 import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog
+from tkinter import ttk, messagebox, simpledialog, filedialog
+import base64
 import yaml
 import os
 import re
@@ -20,6 +21,7 @@ try:
         load_audio_presets,
         save_audio_preset,
         save_source_runtime_config,
+        save_video_source_config,
     )
     streamer = get_streamer()
 
@@ -140,6 +142,22 @@ class YAMLConfigEditor:
             for name, value in zip(('x', 'y', 'width', 'height'), ('0', '0', '240', '240'))
         }
 
+        # 本地视频播放控制和预览。
+        self.video_path_var = tk.StringVar(value="")
+        self.video_play_mode_var = tk.StringVar(value="循环列表")
+        self.video_playback_rate_var = tk.DoubleVar(value=1.0)
+        self.video_playback_rate_text_var = tk.StringVar(value="1.0×")
+        self.video_now_playing_var = tk.StringVar(value="尚未播放")
+        self.video_progress_var = tk.DoubleVar(value=0.0)
+        self.video_progress_text_var = tk.StringVar(value="00:00 / 00:00")
+        self.video_preview_enabled_var = tk.BooleanVar(value=True)
+        self.video_list_items = {}
+        self.video_list_signature = ()
+        self.video_preview_image = None
+        self.video_refresh_job = None
+        self.video_idle_playback_job = None
+        self.updating_video_controls = False
+
         # 音频效果和参数完全由各效果模块提供，UI 不再维护重复常量。
         self.audio_effect_catalog = []
         self.audio_effect_meta = {}
@@ -164,6 +182,8 @@ class YAMLConfigEditor:
         self.setup_ui()
         self.refresh_source_list()
         self.load_config()
+        self.video_refresh_job = self.root.after(200, self.update_video_playback_status)
+        self.video_idle_playback_job = self.root.after(15, self.drive_video_when_not_streaming)
 
         # 绑定关闭事件
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -377,6 +397,113 @@ class YAMLConfigEditor:
             entry.bind('<Return>', lambda event: self.apply_screen_region())
         self.screen_controls_frame.grid_remove()
 
+        # 仅在选中 video_file 源时显示，播放参数可实时应用并保存。
+        self.video_controls_frame = ttk.LabelFrame(source_frame, text="本地视频播放", padding="8")
+        self.video_controls_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(8, 0))
+        self.video_controls_frame.columnconfigure(1, weight=1)
+
+        ttk.Label(self.video_controls_frame, text="视频路径:").grid(row=0, column=0, sticky=tk.W)
+        video_path_entry = ttk.Entry(self.video_controls_frame, textvariable=self.video_path_var)
+        video_path_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(6, 6))
+        video_path_entry.bind('<Return>', lambda event: self.apply_video_settings(include_path=True))
+        video_path_buttons = ttk.Frame(self.video_controls_frame)
+        video_path_buttons.grid(row=0, column=2, sticky=tk.E)
+        ttk.Button(video_path_buttons, text="选择目录", command=self.choose_video_directory).pack(side=tk.LEFT)
+        ttk.Button(video_path_buttons, text="选择视频", command=self.choose_video_file).pack(side=tk.LEFT, padx=(6, 0))
+
+        playback_settings = ttk.Frame(self.video_controls_frame)
+        playback_settings.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(8, 6))
+        playback_settings.columnconfigure(3, weight=1)
+        ttk.Label(playback_settings, text="播放模式:").grid(row=0, column=0, sticky=tk.W)
+        self.video_play_mode_combo = ttk.Combobox(
+            playback_settings,
+            textvariable=self.video_play_mode_var,
+            values=("循环单个视频", "循环列表", "列表内随机"),
+            state="readonly",
+            width=14,
+        )
+        self.video_play_mode_combo.grid(row=0, column=1, sticky=tk.W, padx=(6, 18))
+        self.video_play_mode_combo.bind(
+            '<<ComboboxSelected>>',
+            lambda event: self.apply_video_settings(),
+        )
+        ttk.Label(playback_settings, text="播放速率:").grid(row=0, column=2, sticky=tk.W)
+        self.video_rate_scale = ttk.Scale(
+            playback_settings,
+            from_=0.5,
+            to=2.0,
+            variable=self.video_playback_rate_var,
+            command=self.on_video_rate_changed,
+        )
+        self.video_rate_scale.grid(row=0, column=3, sticky=(tk.W, tk.E), padx=(6, 6))
+        self.video_rate_scale.bind('<ButtonRelease-1>', lambda event: self.apply_video_settings())
+        ttk.Label(
+            playback_settings,
+            textvariable=self.video_playback_rate_text_var,
+            width=5,
+        ).grid(row=0, column=4, sticky=tk.W)
+        ttk.Checkbutton(
+            playback_settings,
+            text="显示预览",
+            variable=self.video_preview_enabled_var,
+            command=self.toggle_video_preview,
+        ).grid(row=0, column=5, padx=(10, 6))
+        ttk.Button(
+            playback_settings,
+            text="保存参数",
+            command=self.save_video_config,
+        ).grid(row=0, column=6)
+
+        video_status_frame = ttk.Frame(self.video_controls_frame)
+        video_status_frame.grid(row=2, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 6))
+        video_status_frame.columnconfigure(0, weight=1)
+        ttk.Label(
+            video_status_frame,
+            textvariable=self.video_now_playing_var,
+            foreground="#356a8a",
+        ).grid(row=0, column=0, sticky=tk.W)
+        ttk.Label(
+            video_status_frame,
+            textvariable=self.video_progress_text_var,
+        ).grid(row=0, column=1, sticky=tk.E)
+        ttk.Progressbar(
+            video_status_frame,
+            variable=self.video_progress_var,
+            maximum=100.0,
+        ).grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(4, 0))
+
+        video_content = ttk.Frame(self.video_controls_frame)
+        video_content.grid(row=3, column=0, columnspan=3, sticky=(tk.W, tk.E))
+        video_content.columnconfigure(0, weight=1)
+        list_frame = ttk.LabelFrame(video_content, text="视频列表（单击立即播放）", padding=4)
+        list_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 8))
+        list_frame.columnconfigure(0, weight=1)
+        list_frame.rowconfigure(0, weight=1)
+        self.video_list = ttk.Treeview(list_frame, show='tree', height=7, selectmode='browse')
+        self.video_list.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        video_list_scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.video_list.yview)
+        video_list_scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
+        self.video_list.configure(yscrollcommand=video_list_scrollbar.set)
+        self.video_list.bind('<<TreeviewSelect>>', self.on_video_list_selected)
+
+        self.video_preview_frame = ttk.LabelFrame(video_content, text="播放预览", padding=4)
+        self.video_preview_frame.grid(row=0, column=1, sticky=(tk.N, tk.E))
+        self.video_preview_label = tk.Label(
+            self.video_preview_frame,
+            text="等待视频画面",
+            bg="#111111",
+            fg="#dddddd",
+            width=32,
+            height=10,
+        )
+        self.video_preview_label.pack()
+        ttk.Button(
+            self.video_preview_frame,
+            text="关闭预览",
+            command=self.close_video_preview,
+        ).pack(anchor=tk.E, pady=(4, 0))
+        self.video_controls_frame.grid_remove()
+
         # 音频工作台由效果模块的元数据动态生成。
         self.audio_controls_frame = ttk.LabelFrame(source_frame, text="音频可视化工作台（实时生效）", padding="8")
         self.audio_controls_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(8, 0))
@@ -543,6 +670,7 @@ class YAMLConfigEditor:
             self.source_combo.configure(values=(), state=tk.DISABLED)
             self.switch_source_button.configure(state=tk.DISABLED)
             self.screen_controls_frame.grid_remove()
+            self.video_controls_frame.grid_remove()
             self.audio_controls_frame.grid_remove()
             return
 
@@ -565,18 +693,21 @@ class YAMLConfigEditor:
                 self.switch_source_button.configure(state=tk.NORMAL)
                 self.source_var.set(active_label or labels[0])
                 self.refresh_screen_controls()
+                self.refresh_video_controls()
                 self.refresh_audio_controls()
             else:
                 self.source_combo.configure(state=tk.DISABLED)
                 self.switch_source_button.configure(state=tk.DISABLED)
                 self.source_var.set("")
                 self.screen_controls_frame.grid_remove()
+                self.video_controls_frame.grid_remove()
                 self.audio_controls_frame.grid_remove()
                 self.log_message("没有成功加载的图像源，请检查 config_stream.yaml")
         except Exception as e:
             self.source_combo.configure(values=(), state=tk.DISABLED)
             self.switch_source_button.configure(state=tk.DISABLED)
             self.screen_controls_frame.grid_remove()
+            self.video_controls_frame.grid_remove()
             self.audio_controls_frame.grid_remove()
             self.log_message(f"读取图像源失败: {str(e)}")
 
@@ -597,6 +728,7 @@ class YAMLConfigEditor:
                 self.log_message(f"已切换图像源: {source_id}")
                 self.status_var.set(f"当前图像源: {source_id}")
                 self.refresh_screen_controls()
+                self.refresh_video_controls()
                 self.refresh_audio_controls()
             else:
                 messagebox.showerror("错误", f"图像源不存在或不可用: {source_id}")
@@ -768,6 +900,249 @@ class YAMLConfigEditor:
         selector.bind('<Escape>', cancel)
         selector.focus_force()
         self.status_var.set("请拖动鼠标选择截图区域")
+
+    @staticmethod
+    def format_video_time(seconds):
+        seconds = max(0, int(seconds or 0))
+        hours, remainder = divmod(seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        return f"{hours:d}:{minutes:02d}:{seconds:02d}" if hours else f"{minutes:02d}:{seconds:02d}"
+
+    def refresh_video_controls(self):
+        """从选中的本地视频源加载路径、列表和播放参数。"""
+        source_id = self.get_selected_source_id()
+        if not source_id or self.source_type_by_id.get(source_id) != 'video_file':
+            self.video_controls_frame.grid_remove()
+            return
+
+        try:
+            info = streamer.get_source_info(source_id)
+            mode_labels = {
+                'single_loop': '循环单个视频',
+                'list_loop': '循环列表',
+                'random': '列表内随机',
+            }
+            self.updating_video_controls = True
+            self.video_path_var.set(info.get('video_path', ''))
+            self.video_play_mode_var.set(mode_labels.get(info.get('play_mode'), '循环列表'))
+            rate = float(info.get('playback_rate', 1.0))
+            self.video_playback_rate_var.set(rate)
+            self.video_playback_rate_text_var.set(f"{rate:g}×")
+            self.video_preview_enabled_var.set(bool(info.get('preview_enabled', True)))
+            self.rebuild_video_list(info.get('video_files', []))
+            self.update_video_status_widgets(info)
+            self.update_video_preview_visibility()
+            self.video_controls_frame.grid()
+        except Exception as e:
+            self.video_controls_frame.grid_remove()
+            self.log_message(f"读取视频参数失败: {str(e)}")
+        finally:
+            self.updating_video_controls = False
+
+    def rebuild_video_list(self, video_files):
+        signature = tuple(video_files or ())
+        if signature == self.video_list_signature:
+            return
+        self.video_list_signature = signature
+        self.video_list_items.clear()
+        for item_id in self.video_list.get_children():
+            self.video_list.delete(item_id)
+        for index, video_name in enumerate(signature):
+            item_id = self.video_list.insert('', tk.END, text=video_name)
+            self.video_list_items[item_id] = video_name
+        self.video_list.tag_configure('playing', foreground='#0b6e99')
+
+    def update_video_status_widgets(self, info):
+        current_video = info.get('current_video')
+        self.video_now_playing_var.set(
+            f"正在播放：{current_video}" if current_video else "尚未播放"
+        )
+        position = float(info.get('position_seconds', 0.0) or 0.0)
+        duration = float(info.get('duration_seconds', 0.0) or 0.0)
+        progress = float(info.get('progress', 0.0) or 0.0)
+        self.video_progress_var.set(max(0.0, min(progress * 100.0, 100.0)))
+        self.video_progress_text_var.set(
+            f"{self.format_video_time(position)} / {self.format_video_time(duration)}"
+        )
+        for item_id, video_name in self.video_list_items.items():
+            self.video_list.item(item_id, tags=('playing',) if video_name == current_video else ())
+
+    def on_video_rate_changed(self, value):
+        try:
+            rate = max(0.5, min(float(value), 2.0))
+            self.video_playback_rate_text_var.set(f"{rate:.2f}".rstrip('0').rstrip('.') + "×")
+        except (TypeError, ValueError):
+            pass
+
+    def apply_video_settings(self, include_path=False):
+        if self.updating_video_controls:
+            return False
+        source_id = self.get_selected_source_id()
+        if not source_id or self.source_type_by_id.get(source_id) != 'video_file':
+            return False
+        mode_values = {
+            '循环单个视频': 'single_loop',
+            '循环列表': 'list_loop',
+            '列表内随机': 'random',
+        }
+        config = {
+            'play_mode': mode_values.get(self.video_play_mode_var.get(), 'list_loop'),
+            'playback_rate': max(0.5, min(float(self.video_playback_rate_var.get()), 2.0)),
+            'preview_enabled': bool(self.video_preview_enabled_var.get()),
+        }
+        if include_path:
+            video_path = self.video_path_var.get().strip()
+            if not video_path:
+                messagebox.showwarning("视频路径", "请先选择包含 MP4 视频的目录")
+                return False
+            current_path = streamer.get_source_info(source_id).get('video_path', '')
+            if os.path.normcase(os.path.abspath(video_path)) != os.path.normcase(os.path.abspath(current_path)):
+                config['video_path'] = video_path
+        try:
+            if not streamer.set_source_config(config, source_id):
+                raise ValueError("路径中没有可播放的 MP4 视频，或视频无法打开")
+            self.refresh_video_controls()
+            return True
+        except Exception as e:
+            messagebox.showerror("应用视频参数失败", str(e))
+            self.log_message(f"应用视频参数失败: {str(e)}")
+            return False
+
+    def choose_video_directory(self):
+        initial = self.video_path_var.get().strip()
+        directory = filedialog.askdirectory(
+            parent=self.root,
+            title="选择包含 MP4 视频的目录",
+            initialdir=initial if os.path.isdir(initial) else None,
+        )
+        if directory:
+            self.video_path_var.set(directory)
+            if self.apply_video_settings(include_path=True):
+                self.log_message(f"已加载视频目录: {directory}")
+
+    def choose_video_file(self):
+        initial = self.video_path_var.get().strip()
+        video_file = filedialog.askopenfilename(
+            parent=self.root,
+            title="选择要播放的视频",
+            initialdir=initial if os.path.isdir(initial) else None,
+            filetypes=(("MP4 视频", "*.mp4"), ("所有文件", "*.*")),
+        )
+        if not video_file:
+            return
+        directory, video_name = os.path.split(video_file)
+        self.video_path_var.set(directory)
+        if self.apply_video_settings(include_path=True):
+            source_id = self.get_selected_source_id()
+            if streamer.set_source_config({'play_video': video_name}, source_id):
+                self.log_message(f"正在播放指定视频: {video_name}")
+
+    def on_video_list_selected(self, event=None):
+        if self.updating_video_controls:
+            return
+        selection = self.video_list.selection()
+        if not selection:
+            return
+        video_name = self.video_list_items.get(selection[0])
+        source_id = self.get_selected_source_id()
+        if not video_name or not source_id:
+            return
+        try:
+            if not streamer.set_source_config({'play_video': video_name}, source_id):
+                raise ValueError("无法打开所选视频")
+            self.log_message(f"正在播放指定视频: {video_name}")
+            self.update_video_playback_status(reschedule=False)
+        except Exception as e:
+            messagebox.showerror("播放失败", str(e))
+
+    def update_video_preview_visibility(self):
+        if self.video_preview_enabled_var.get():
+            self.video_preview_frame.grid()
+        else:
+            self.video_preview_frame.grid_remove()
+            self.video_preview_image = None
+            self.video_preview_label.configure(image='', text="预览已关闭")
+
+    def toggle_video_preview(self):
+        self.update_video_preview_visibility()
+        self.apply_video_settings()
+
+    def close_video_preview(self):
+        self.video_preview_enabled_var.set(False)
+        self.toggle_video_preview()
+
+    def update_video_preview(self, source_id):
+        frame = streamer.get_source_preview(source_id)
+        if frame is None:
+            self.video_preview_label.configure(image='', text="等待视频画面")
+            self.video_preview_image = None
+            return
+        height, width = frame.shape[:2]
+        scale = min(240 / max(width, 1), 160 / max(height, 1))
+        preview_width = max(1, int(width * scale))
+        preview_height = max(1, int(height * scale))
+        preview = cv2.resize(frame, (preview_width, preview_height), interpolation=cv2.INTER_AREA)
+        ok, encoded = cv2.imencode('.png', preview)
+        if not ok:
+            return
+        image_data = base64.b64encode(encoded.tobytes()).decode('ascii')
+        self.video_preview_image = tk.PhotoImage(data=image_data, format='png')
+        self.video_preview_label.configure(image=self.video_preview_image, text='')
+
+    def update_video_playback_status(self, reschedule=True):
+        try:
+            source_id = self.get_selected_source_id()
+            if source_id and self.source_type_by_id.get(source_id) == 'video_file':
+                info = streamer.get_source_info(source_id)
+                self.update_video_status_widgets(info)
+                if self.video_preview_enabled_var.get():
+                    self.update_video_preview(source_id)
+        except (RuntimeError, tk.TclError):
+            return
+        except Exception as e:
+            self.log_message(f"刷新视频播放状态失败: {str(e)}")
+        finally:
+            if reschedule:
+                try:
+                    if self.root.winfo_exists():
+                        self.video_refresh_job = self.root.after(200, self.update_video_playback_status)
+                except tk.TclError:
+                    self.video_refresh_job = None
+
+    def drive_video_when_not_streaming(self):
+        """未开始 UDP 推流时也推进活动视频，让列表点播与预览可以独立工作。"""
+        try:
+            source_id = self.get_selected_source_id()
+            if (
+                not self.streaming
+                and source_id
+                and self.source_type_by_id.get(source_id) == 'video_file'
+            ):
+                streamer.get_frame()
+        except Exception:
+            pass
+        finally:
+            try:
+                self.video_idle_playback_job = self.root.after(15, self.drive_video_when_not_streaming)
+            except tk.TclError:
+                self.video_idle_playback_job = None
+
+    def save_video_config(self):
+        """保存当前视频源的路径、模式、倍速、首播视频和预览设置。"""
+        source_id = self.get_selected_source_id()
+        if not source_id or self.source_type_by_id.get(source_id) != 'video_file':
+            return
+        if not self.apply_video_settings(include_path=True):
+            return
+        try:
+            runtime_config = streamer.get_source_info(source_id)
+            path = save_video_source_config(source_id, runtime_config)
+            self.log_message(f"视频参数已保存: {path}")
+            self.status_var.set(f"视频参数已保存: {source_id}")
+            messagebox.showinfo("成功", "视频参数已保存，下次启动时会自动恢复。")
+        except Exception as e:
+            messagebox.showerror("错误", f"保存视频参数失败: {str(e)}")
+            self.log_message(f"保存视频参数失败: {str(e)}")
 
     def refresh_audio_controls(self):
         """从当前音频源读取效果目录、参数元数据和运行时值。"""
@@ -1589,6 +1964,18 @@ class YAMLConfigEditor:
 
     def on_closing(self):
         """窗口关闭时的处理"""
+        if self.video_refresh_job is not None:
+            try:
+                self.root.after_cancel(self.video_refresh_job)
+            except tk.TclError:
+                pass
+            self.video_refresh_job = None
+        if self.video_idle_playback_job is not None:
+            try:
+                self.root.after_cancel(self.video_idle_playback_job)
+            except tk.TclError:
+                pass
+            self.video_idle_playback_job = None
         if self.streaming:
             self.stop_streaming()
             # 等待一小段时间让线程结束

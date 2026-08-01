@@ -136,7 +136,7 @@ streamer:
 | --- | --- | --- |
 | `demo` | 内置测试画面 | 无 |
 | `screen` | 屏幕、区域或窗口截图 | `display_idx`、`region`、`window_title`、`use_mss` |
-| `video_file` | 循环播放目录中的 MP4 视频 | `video_path`、`auto_play_next`、`random_play`、`first_play_video` |
+| `video_file` | 循环或随机播放目录中的 MP4 视频 | `video_path`、`play_mode`、`playback_rate`、`first_play_video` |
 | `audio_visualization` | 将音频输入绘制为动态画面 | `target_device`、`input`、`effects` |
 | `camera` | 本地摄像头 | `camera_idx`、`resolution`、`fps` |
 | `rtsp` | 网络视频流 | `rtsp_url`、`timeout`、`rtsp_transport` |
@@ -194,12 +194,19 @@ streamer:
   enable: true
   params:
     video_path: sample_video
-    auto_play_next: true
+    play_mode: list_loop
+    playback_rate: 1.0
     auto_crop_center: true
-    random_play: true
+    preview_enabled: true
     # first_play_video: example.mp4
     fps: 30
 ```
+
+`play_mode` 可设为 `single_loop`（循环单个视频）、`list_loop`（循环列表）或
+`random`（列表内随机），`playback_rate` 支持 `0.5`～`2.0` 倍速。
+程序运行后选择 `video_file` 源，可以直接选择目录或单个 MP4、单击列表点播，
+并查看当前视频、播放进度和可关闭的小窗预览。“保存参数”会把视频路径、播放模式、
+倍速、当前首播视频及预览设置写回 `config_stream.yaml`。
 
 使用 Windows 绝对路径时，建议使用单引号或正斜杠，例如：
 

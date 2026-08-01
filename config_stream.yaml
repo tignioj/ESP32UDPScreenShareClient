@@ -445,9 +445,10 @@ streamer:
     enable: true
     params:
       video_path: sample_video
-      auto_play_next: true
+      play_mode: random
+      playback_rate: 1.0
       auto_crop_center: true
-      random_play: true
+      preview_enabled: true
       fps: 30
   - type: screen
     id: window_region

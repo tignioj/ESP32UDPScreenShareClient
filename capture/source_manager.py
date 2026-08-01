@@ -155,6 +155,13 @@ class SourceManager:
             source = self.get_source(source_id)
             return source.get_info() if source else {}
 
+    def get_source_preview(self, source_id: str = None) -> Optional[np.ndarray]:
+        """读取图像源缓存的预览帧，不推进播放位置。"""
+        with self._source_lock:
+            source = self.get_source(source_id)
+            preview_getter = getattr(source, 'get_preview_frame', None) if source else None
+            return preview_getter() if preview_getter else None
+
     def set_source_config(self, config: Dict[str, Any], source_id: str = None) -> bool:
         """在取帧锁内更新图像源运行时配置。"""
         with self._source_lock:

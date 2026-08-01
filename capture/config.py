@@ -52,6 +52,17 @@ elif __file__:
 
 __streamer:Streamer = None
 _AUDIO_CONFIG_KEYS = ("input", "effects")
+_VIDEO_CONFIG_KEYS = (
+    "video_path",
+    "play_mode",
+    "playback_rate",
+    "first_play_video",
+    "auto_play_next",
+    "random_play",
+    "auto_crop_center",
+    "preview_enabled",
+    "fps",
+)
 
 
 def get_stream_config_path() -> Path:
@@ -81,6 +92,24 @@ def _find_audio_source(document: Dict[str, Any], source_id: str) -> Dict[str, An
         raise ValueError(f"配置文件中找不到图像源: {source_id}")
     if source.get('type') != 'audio_visualization':
         raise ValueError(f"图像源不是音频可视化类型: {source_id}")
+    params = source.setdefault('params', {})
+    if not isinstance(params, dict):
+        raise ValueError(f"图像源 {source_id} 的 params 必须是对象")
+    return source
+
+
+def _find_video_source(document: Dict[str, Any], source_id: str) -> Dict[str, Any]:
+    source = next(
+        (
+            item for item in document['streamer']['sources']
+            if isinstance(item, dict) and item.get('id') == source_id
+        ),
+        None,
+    )
+    if source is None:
+        raise ValueError(f"配置文件中找不到图像源: {source_id}")
+    if source.get('type') != 'video_file':
+        raise ValueError(f"图像源不是本地视频类型: {source_id}")
     params = source.setdefault('params', {})
     if not isinstance(params, dict):
         raise ValueError(f"图像源 {source_id} 的 params 必须是对象")
@@ -147,6 +176,34 @@ def save_source_runtime_config(
     path = Path(config_path) if config_path is not None else get_stream_config_path()
     document = _load_stream_config(path)
     source = _find_audio_source(document, source_id)
+    source['params'].update(values)
+    return _write_stream_config(path, document)
+
+
+def save_video_source_config(
+    source_id: str,
+    runtime_config: Dict[str, Any],
+    config_path: Optional[os.PathLike] = None,
+) -> Path:
+    """将本地视频源的路径、播放方式和预览参数原子写回配置。"""
+    if not source_id:
+        raise ValueError("图像源 ID 不能为空")
+    if not isinstance(runtime_config, dict):
+        raise ValueError("运行时配置必须是对象")
+    values = {
+        key: copy.deepcopy(runtime_config[key])
+        for key in _VIDEO_CONFIG_KEYS
+        if key in runtime_config
+    }
+    current_video = runtime_config.get('current_video')
+    if current_video:
+        values['first_play_video'] = current_video
+    if not values:
+        raise ValueError("没有可保存的视频参数")
+
+    path = Path(config_path) if config_path is not None else get_stream_config_path()
+    document = _load_stream_config(path)
+    source = _find_video_source(document, source_id)
     source['params'].update(values)
     return _write_stream_config(path, document)
 

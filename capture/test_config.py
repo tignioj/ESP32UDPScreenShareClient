@@ -9,6 +9,7 @@ from capture.config import (
     load_audio_presets,
     save_audio_preset,
     save_source_runtime_config,
+    save_video_source_config,
 )
 
 
@@ -31,6 +32,11 @@ class ConfigPersistenceTests(unittest.TestCase):
       id: screen_one
       params:
         fps: 30
+    - type: video_file
+      id: video_one
+      params:
+        video_path: old_videos
+        auto_crop_center: true
   active_source: audio_one
 """,
             encoding="utf-8",
@@ -121,6 +127,31 @@ class ConfigPersistenceTests(unittest.TestCase):
             save_source_runtime_config("audio_one", current, path)
 
             self.assertEqual({"保留我": preset}, load_audio_presets("audio_one", path))
+
+    def test_saves_video_playback_parameters_and_current_video(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write_config(directory)
+
+            save_video_source_config(
+                "video_one",
+                {
+                    "video_path": r"D:\Videos\ESP32",
+                    "play_mode": "random",
+                    "playback_rate": 1.5,
+                    "current_video": "demo.mp4",
+                    "preview_enabled": False,
+                },
+                path,
+            )
+
+            document = yaml.safe_load(path.read_text(encoding="utf-8"))
+            video = document["streamer"]["sources"][2]
+            self.assertEqual(r"D:\Videos\ESP32", video["params"]["video_path"])
+            self.assertEqual("random", video["params"]["play_mode"])
+            self.assertEqual(1.5, video["params"]["playback_rate"])
+            self.assertEqual("demo.mp4", video["params"]["first_play_video"])
+            self.assertFalse(video["params"]["preview_enabled"])
+            self.assertTrue(video["params"]["auto_crop_center"])
 
 
 if __name__ == "__main__":
