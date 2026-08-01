@@ -134,6 +134,9 @@ class YAMLConfigEditor:
         self.source_var = tk.StringVar(value="")
         self.source_id_by_label = {}
         self.source_type_by_id = {}
+        self.source_canvas = None
+        self.source_content = None
+        self.source_window = None
 
         # 屏幕截图源运行时控制。
         self.screen_mode_var = tk.StringVar(value="")
@@ -207,28 +210,41 @@ class YAMLConfigEditor:
         source_tab.columnconfigure(0, weight=1)
         source_tab.rowconfigure(0, weight=1)
 
-        source_canvas = tk.Canvas(source_tab, highlightthickness=0, height=500)
-        source_scrollbar = ttk.Scrollbar(source_tab, orient=tk.VERTICAL, command=source_canvas.yview)
-        source_canvas.configure(yscrollcommand=source_scrollbar.set)
-        source_canvas.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        self.source_canvas = tk.Canvas(source_tab, highlightthickness=0, height=500)
+        source_scrollbar = ttk.Scrollbar(
+            source_tab,
+            orient=tk.VERTICAL,
+            command=self.source_canvas.yview,
+        )
+        self.source_canvas.configure(yscrollcommand=source_scrollbar.set)
+        self.source_canvas.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         source_scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
-        source_content = ttk.Frame(source_canvas)
-        source_content.columnconfigure(0, weight=1)
-        source_window = source_canvas.create_window((0, 0), window=source_content, anchor=tk.NW)
-        source_content.bind(
-            "<Configure>",
-            lambda event: source_canvas.configure(scrollregion=source_canvas.bbox("all")),
+        self.source_content = ttk.Frame(self.source_canvas)
+        self.source_content.columnconfigure(0, weight=1)
+        self.source_window = self.source_canvas.create_window(
+            (0, 0),
+            window=self.source_content,
+            anchor=tk.NW,
         )
-        source_canvas.bind(
-            "<Configure>",
-            lambda event: source_canvas.itemconfigure(source_window, width=event.width),
-        )
+        self.source_content.bind("<Configure>", self.on_source_content_configure)
+        self.source_canvas.bind("<Configure>", self.on_source_canvas_configure)
 
         def scroll_source(event):
-            source_canvas.yview_scroll(-int(event.delta / 120), "units")
+            # 动态面板比视口矮时不应保留或产生任何纵向偏移。
+            if self.source_content.winfo_reqheight() <= self.source_canvas.winfo_height():
+                self.source_canvas.yview_moveto(0)
+                return "break"
+            self.source_canvas.yview_scroll(-int(event.delta / 120), "units")
+            return "break"
 
-        source_canvas.bind("<Enter>", lambda event: source_canvas.bind_all("<MouseWheel>", scroll_source))
-        source_canvas.bind("<Leave>", lambda event: source_canvas.unbind_all("<MouseWheel>"))
+        self.source_canvas.bind(
+            "<Enter>",
+            lambda event: self.source_canvas.bind_all("<MouseWheel>", scroll_source),
+        )
+        self.source_canvas.bind(
+            "<Leave>",
+            lambda event: self.source_canvas.unbind_all("<MouseWheel>"),
+        )
 
         ttk.Label(
             udp_tab,
@@ -326,13 +342,13 @@ class YAMLConfigEditor:
         ).pack(side=tk.RIGHT)
 
         ttk.Label(
-            source_content,
+            self.source_content,
             text="选择画面来源；不同来源的专属参数会显示在下方。",
             foreground="#555555",
         ).grid(row=0, column=0, sticky=tk.W, pady=(0, 8))
 
         # 图像源切换
-        source_frame = ttk.LabelFrame(source_content, text="图像源", padding=10)
+        source_frame = ttk.LabelFrame(self.source_content, text="图像源", padding=10)
         source_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         source_frame.columnconfigure(1, weight=1)
 
@@ -661,6 +677,43 @@ class YAMLConfigEditor:
             self.log_message("警告: UDP推流模块不可用，请确保安装了必要的依赖库")
             self.log_message("需要安装: pip install opencv-python numpy mss")
 
+    def refresh_source_scroll_layout(self, reset_to_top=False):
+        """让图像源滚动区贴合当前可见配置，避免切换后残留旧偏移。"""
+        canvas = self.source_canvas
+        content = self.source_content
+        if canvas is None or content is None or self.source_window is None:
+            return
+
+        canvas_width = max(canvas.winfo_width(), 1)
+        viewport_height = max(canvas.winfo_height(), 1)
+        content_height = max(content.winfo_reqheight(), 1)
+        scroll_height = max(content_height, viewport_height)
+
+        canvas.itemconfigure(self.source_window, width=canvas_width)
+        canvas.configure(scrollregion=(0, 0, canvas_width, scroll_height))
+
+        if reset_to_top or content_height <= viewport_height:
+            canvas.yview_moveto(0)
+            return
+
+        # 内容在当前配置变化后仍超过一屏时，也要把旧位置限制在新的底部以内。
+        current_top = canvas.canvasy(0)
+        maximum_top = content_height - viewport_height
+        if current_top < 0:
+            canvas.yview_moveto(0)
+        elif current_top > maximum_top:
+            canvas.yview_moveto(maximum_top / scroll_height)
+
+    def on_source_content_configure(self, event=None):
+        self.refresh_source_scroll_layout()
+
+    def on_source_canvas_configure(self, event=None):
+        self.refresh_source_scroll_layout()
+
+    def reset_source_scroll_position(self):
+        """等所有动态面板完成 grid 更新后，将新来源从顶部显示。"""
+        self.root.after_idle(lambda: self.refresh_source_scroll_layout(reset_to_top=True))
+
     def refresh_source_list(self):
         """把 config_stream.yaml 中成功加载的源显示到下拉框。"""
         self.source_id_by_label.clear()
@@ -695,6 +748,7 @@ class YAMLConfigEditor:
                 self.refresh_screen_controls()
                 self.refresh_video_controls()
                 self.refresh_audio_controls()
+                self.reset_source_scroll_position()
             else:
                 self.source_combo.configure(state=tk.DISABLED)
                 self.switch_source_button.configure(state=tk.DISABLED)
@@ -730,6 +784,7 @@ class YAMLConfigEditor:
                 self.refresh_screen_controls()
                 self.refresh_video_controls()
                 self.refresh_audio_controls()
+                self.reset_source_scroll_position()
             else:
                 messagebox.showerror("错误", f"图像源不存在或不可用: {source_id}")
                 self.refresh_source_list()
