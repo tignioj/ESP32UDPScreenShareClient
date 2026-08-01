@@ -354,17 +354,6 @@ class YAMLConfigEditor:
         for key in ('server_ip', 'server_port'):
             self.entries[key].bind("<KeyRelease>", self.on_udp_parameter_edited)
 
-        udp_action_frame = ttk.Frame(udp_tab)
-        udp_action_frame.grid(row=4, column=0, sticky=(tk.W, tk.E))
-        ttk.Button(udp_action_frame, text="保存 UDP 配置", command=self.save_config).pack(side=tk.LEFT)
-        ttk.Button(udp_action_frame, text="恢复预设5", command=self.reset_to_default).pack(side=tk.LEFT, padx=8)
-        ttk.Button(udp_action_frame, text="查看 YAML", command=self.show_yaml).pack(side=tk.LEFT)
-        ttk.Label(
-            udp_action_frame,
-            text=f"自动读取/保存：{self.config_file}",
-            foreground="#777777",
-        ).pack(side=tk.RIGHT)
-
         ttk.Label(
             self.source_content,
             text="选择画面来源；不同来源的专属参数会显示在下方。",
@@ -2061,59 +2050,6 @@ class YAMLConfigEditor:
         except Exception as e:
             messagebox.showerror("错误", f"删除个人 UDP 预设失败: {str(e)}")
             self.log_message(f"删除个人 UDP 预设失败: {str(e)}")
-
-    def save_config(self):
-        """保存固定位置的 UDP 配置文件。"""
-        errors = self.validate_inputs()
-        if errors:
-            messagebox.showerror("输入错误", "\n".join(errors))
-            return
-
-        try:
-            config = self.get_udp_form_config()
-            self.write_udp_config(config)
-
-            self.log_message(f"UDP 配置已保存: {self.config_file}")
-            self.status_var.set(f"UDP 配置已保存: {self.config_file}")
-            messagebox.showinfo("成功", "UDP 发送配置已保存")
-
-        except Exception as e:
-            messagebox.showerror("错误", f"保存配置文件失败: {str(e)}")
-            self.log_message(f"保存配置文件失败: {str(e)}")
-            self.status_var.set("保存配置文件失败")
-
-    def reset_to_default(self):
-        """恢复预设5，同时保留用户已填写的 ESP32 地址。"""
-        self.apply_preset(self.default_preset_name, restart_if_streaming=True)
-
-    def show_yaml(self):
-        """显示当前配置的YAML格式"""
-        try:
-            config = self.build_udp_config_document()
-
-            # 生成YAML字符串
-            yaml_str = yaml.safe_dump(
-                config,
-                default_flow_style=False,
-                allow_unicode=True,
-                sort_keys=False,
-            )
-
-            # 显示在弹窗中
-            popup = tk.Toplevel(self.root)
-            popup.title("YAML 内容预览")
-            popup.geometry("400x300")
-
-            text_widget = tk.Text(popup, wrap=tk.WORD)
-            text_widget.pack(expand=True, fill=tk.BOTH, padx=10, pady=10)
-
-            text_widget.insert(tk.END, yaml_str)
-            text_widget.config(state=tk.DISABLED)
-
-            ttk.Button(popup, text="关闭", command=popup.destroy).pack(pady=5)
-
-        except Exception as e:
-            messagebox.showerror("错误", f"生成YAML失败: {str(e)}")
 
     def start_streaming(self):
         """开始UDP推流"""
