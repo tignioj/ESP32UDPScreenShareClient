@@ -28,7 +28,10 @@ class ScreenCaptureSource(ImageSourceInterface):
             )
         elif system == "Darwin":
             from capture.screen_source.screenshot_mac import MacScreenCapture
-            self._impl = MacScreenCapture(self.display_idx)
+            self._impl = MacScreenCapture(
+                source_id=self.source_id,
+                display_idx=self.display_idx,
+            )
         elif system == "Linux":
             from capture.screen_source.screenshot_linux import LinuxScreenCapture
             self._impl = LinuxScreenCapture(self.display_idx)
@@ -52,7 +55,7 @@ class ScreenCaptureSource(ImageSourceInterface):
         if not self._impl:
             return {}
 
-        info = self._impl.get_info()
+        info = self._impl.get_info() or {}
         info.update({
             'source_type': self.source_type.value,
             'source_id': self.source_id,
