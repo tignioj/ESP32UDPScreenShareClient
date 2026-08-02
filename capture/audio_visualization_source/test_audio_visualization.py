@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 
@@ -103,6 +103,13 @@ class AudioVisualizationTests(unittest.TestCase):
             "active_preset": "已删除",
             "presets": {},
         }))
+
+    def test_runtime_device_selection_is_forwarded_to_visualizer(self):
+        source = AudioVisualizationSource(SourceType.AUDIO_VISUALIZATION, "test")
+        source.visualizer = Mock()
+
+        self.assertTrue(source.set_config({"target_device": "BlackHole 2ch"}))
+        source.visualizer.select_input_device.assert_called_once_with("BlackHole 2ch")
 
     @patch("capture.audio_visualization_source.audio_visualization_source.AudioVisualizer")
     def test_initialize_applies_the_saved_preset_after_base_values(self, visualizer_type):

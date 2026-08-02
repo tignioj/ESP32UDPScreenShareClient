@@ -154,7 +154,7 @@ streamer:
 | `demo` | 内置测试画面 | 无 |
 | `screen` | 屏幕、区域或窗口截图 | `display_idx`、`region`、`window_title`、`use_mss` |
 | `video_file` | 循环或随机播放目录中的 MP4 视频 | `video_path`、`play_mode`、`playback_rate`、`first_play_video` |
-| `audio_visualization` | 将音频输入绘制为动态画面 | `target_device`、`input`、`effects` |
+| `audio_visualization` | 将麦克风、虚拟音频设备或外接输入绘制为动态画面 | `target_device`、`input`、`effects` |
 | `camera` | 本地摄像头 | `camera_idx`、`resolution`、`fps` |
 | `rtsp` | 网络视频流 | `rtsp_url`、`timeout`、`rtsp_transport` |
 
@@ -267,7 +267,18 @@ video_path: D:/Videos/ESP32
 
 音频可视化会采集一个录音设备，并将声音转换为频谱、波形、光环、粒子等画面。若只需要共享屏幕或播放视频，可以跳过本节。
 
-### 1. 安装并配置 VB-CABLE
+### 1. 选择音频来源
+
+程序会在“音频可视化工作台”的“音频来源”下拉框列出所有可录音设备，可在运行中切换并点击“保存参数”记住选择：
+
+- **Mac 系统声音**：安装 [BlackHole](https://existential.audio/blackhole/)，在“音频 MIDI 设置”中创建“多输出设备”，将扬声器/耳机和 BlackHole 一起勾选；随后在本程序中选择 `BlackHole 2ch`。这样既能听到声音，也能做可视化。
+- **指定应用或更复杂混音**：可使用 Loopback 等虚拟音频设备，选择它创建的录音输入。
+- **麦克风、USB 声卡或线路输入**：直接在下拉框选择相应设备即可。首次使用麦克风时，macOS 可能要求在“隐私与安全性 → 麦克风”中授权终端或应用。
+- **Windows 系统声音**：可按下面的 VB-CABLE 方法配置。
+
+如果留空 `target_device`，程序使用操作系统的默认录音设备；程序会自动在设备不支持 48 kHz 时改用其原生采样率。
+
+### 2. Windows：安装并配置 VB-CABLE
 
 1. 安装 [VB-CABLE](https://vb-audio.com/Cable/)；
 2. 打开 Windows“设置 → 系统 → 声音”，将播放设备设为 `CABLE Input`；
@@ -279,14 +290,15 @@ video_path: D:/Videos/ESP32
 
 ![侦听 CABLE Output](audio_output_setting.png)
 
-### 2. 配置音频源
+### 3. 配置音频源
 
 ```yaml
 - type: audio_visualization
   id: audio_visual1
   enable: true
   params:
-    target_device: CABLE Output
+    # macOS 可填写 BlackHole 2ch；Windows 可填写 CABLE Output；留空则用默认输入。
+    target_device: ''
     input:
       gain: 1.0
       noise_gate: 0.0015
@@ -310,7 +322,7 @@ video_path: D:/Videos/ESP32
           drift: 0.65
 ```
 
-若找不到 `target_device` 指定的设备，程序会尝试使用系统默认录音设备。
+若找不到 `target_device` 指定的设备，程序会尝试使用系统默认录音设备。更推荐从界面下拉框选择，以避免设备名称不完全一致。
 
 程序中的“音频可视化工作台”可以实时启用、叠加和调整效果。“保存参数”会写回 `config_stream.yaml`；效果组合预设可以保存、应用、覆盖或删除完整的效果组合。
 

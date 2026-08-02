@@ -27,11 +27,13 @@ class AudioVisualizer:
 
     def __init__(self, width: int = 240, height: int = 240, sample_rate: int = 48000,
                  block_size: int = 1024, channels: int = 2,
-                 target_device: str = "CABLE Output", start_audio: bool = True):
+                 target_device: str = "", start_audio: bool = True):
         self.width = int(width)
         self.height = int(height)
+        self.requested_sample_rate = int(sample_rate)
         self.sample_rate = int(sample_rate)
         self.block_size = int(block_size)
+        self.requested_channels = int(channels)
         self.channels = int(channels)
         self.target_device = target_device
         self.input_values = {item.key: item.default for item in INPUT_PARAMETERS}
@@ -63,9 +65,35 @@ class AudioVisualizer:
     def effect_catalog() -> list[Dict[str, Any]]:
         return get_effect_catalog()
 
+    @staticmethod
+    def input_devices() -> list[Dict[str, Any]]:
+        """Return every recordable device in a UI-friendly, portable form."""
+        devices = sd.query_devices()
+        default_input = sd.default.device[0]
+        result = []
+        for index, device in enumerate(devices):
+            if int(device["max_input_channels"]) < 1:
+                continue
+            name = str(device["name"])
+            result.append({
+                "name": name,
+                "label": name,
+                "index": index,
+                "channels": int(device["max_input_channels"]),
+                "default": index == default_input,
+                "sample_rate": int(round(float(device["default_samplerate"]))),
+            })
+        return result
+
     def _find_audio_device(self, target_name: str) -> Optional[int]:
         devices = sd.query_devices()
         if target_name:
+            for index, device in enumerate(devices):
+                if target_name == str(device["name"]) and device["max_input_channels"] > 0:
+                    print(f"使用音频设备: {device['name']}")
+                    return index
+            # Keep partial matching for existing Windows configurations such as
+            # "CABLE Output (VB-Audio Virtual Cable)".
             for index, device in enumerate(devices):
                 if target_name.lower() in str(device["name"]).lower() and device["max_input_channels"] > 0:
                     print(f"使用音频设备: {device['name']}")
@@ -78,30 +106,63 @@ class AudioVisualizer:
             return int(default_input)
         raise RuntimeError(f"没有可用的音频输入设备（未找到 {target_name}）")
 
+    def _create_audio_stream(self, device_id: Optional[int]) -> sd.InputStream:
+        """Open a device, falling back to its native rate when needed.
+
+        CoreAudio exposes microphones and virtual loopback devices at different
+        native rates.  Letting PortAudio use that native rate makes both kinds
+        of inputs work without a per-device YAML tweak.
+        """
+        device = sd.query_devices(device_id, "input")
+        max_channels = int(device["max_input_channels"])
+        if max_channels < 1:
+            raise RuntimeError(f"音频设备没有输入声道: {device['name']}")
+        channels = min(self.requested_channels, max_channels)
+        native_rate = int(round(float(device["default_samplerate"])))
+        rates = [self.requested_sample_rate]
+        if native_rate not in rates:
+            rates.append(native_rate)
+        last_error = None
+        for rate in rates:
+            try:
+                stream = sd.InputStream(
+                    device=device_id,
+                    channels=channels,
+                    samplerate=rate,
+                    blocksize=self.block_size,
+                    callback=self._audio_callback,
+                )
+                stream.start()
+                self.channels = channels
+                self.sample_rate = rate
+                if rate != self.requested_sample_rate:
+                    print(f"音频设备 {device['name']} 不支持 {self.requested_sample_rate} Hz，已使用 {rate} Hz")
+                return stream
+            except Exception as exc:
+                last_error = exc
+        raise RuntimeError(f"无法打开音频设备 {device['name']}: {last_error}")
+
     def _initialize_audio_stream(self) -> None:
         try:
-            device = sd.query_devices(self.device_id, "input")
-            max_channels = int(device["max_input_channels"])
-            if max_channels < 1:
-                raise RuntimeError(f"音频设备没有输入声道: {device['name']}")
-            actual_channels = min(self.channels, max_channels)
-            if actual_channels != self.channels:
-                print(
-                    f"音频设备 {device['name']} 最多支持 {max_channels} 个输入声道，"
-                    f"已从 {self.channels} 自动调整为 {actual_channels} 声道"
-                )
-                self.channels = actual_channels
-            self.stream = sd.InputStream(
-                device=self.device_id,
-                channels=self.channels,
-                samplerate=self.sample_rate,
-                blocksize=self.block_size,
-                callback=self._audio_callback,
-            )
-            self.stream.start()
+            self.stream = self._create_audio_stream(self.device_id)
         except Exception as exc:
             self.stream = None
             raise RuntimeError(f"无法启动音频输入流: {exc}") from exc
+
+    def select_input_device(self, target_device: str) -> None:
+        """Switch capture devices without stopping the visualizer source."""
+        target_device = str(target_device or "")
+        new_device_id = self._find_audio_device(target_device)
+        new_stream = self._create_audio_stream(new_device_id)
+        old_stream = self.stream
+        self.stream = new_stream
+        self.device_id = new_device_id
+        self.target_device = target_device
+        if old_stream is not None:
+            try:
+                old_stream.stop()
+            finally:
+                old_stream.close()
 
     def _audio_callback(self, indata, frames, callback_time, status) -> None:
         if status:
@@ -182,6 +243,9 @@ class AudioVisualizer:
     def get_config(self) -> Dict[str, Any]:
         with self._lock:
             return {
+                "target_device": self.target_device,
+                "sample_rate": self.sample_rate,
+                "channels": self.channels,
                 "input": dict(self.input_values),
                 "effects": {
                     effect_id: {

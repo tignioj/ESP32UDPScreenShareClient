@@ -42,7 +42,10 @@ class AudioVisualizationSource(ImageSourceInterface):
             "sample_rate": 48000,
             "block_size": 1024,
             "channels": 2,
-            "target_device": "CABLE Output",
+            # An empty device means the operating system's default recording
+            # input. This works on macOS out of the box and remains compatible
+            # with Windows users who configure CABLE Output explicitly.
+            "target_device": "",
         }
         options.update({key: kwargs[key] for key in self.VISUALIZER_OPTIONS if key in kwargs})
         try:
@@ -86,6 +89,7 @@ class AudioVisualizationSource(ImageSourceInterface):
             "audio_ui": {
                 "input_parameters": AudioVisualizer.input_catalog(),
                 "effects": AudioVisualizer.effect_catalog(),
+                "devices": AudioVisualizer.input_devices(),
             },
         }
 
@@ -159,8 +163,15 @@ class AudioVisualizationSource(ImageSourceInterface):
         if self.visualizer is None or not isinstance(config, dict):
             return False
         try:
+            target_device = config.get("target_device")
+            handled_device = target_device is not None
+            if target_device is not None:
+                if not isinstance(target_device, str):
+                    raise ValueError("target_device 必须是字符串")
+                with self._config_lock:
+                    self.visualizer.select_input_device(target_device)
             translated = self._translate_config(config)
-            if not translated and config:
+            if not translated and config and not handled_device:
                 return False
             with self._config_lock:
                 self.visualizer.configure(translated)

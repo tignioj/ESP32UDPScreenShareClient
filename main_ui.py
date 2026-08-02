@@ -185,6 +185,8 @@ class YAMLConfigEditor:
         self.audio_effect_label_to_id = {}
         self.audio_effect_config = {}
         self.audio_input_catalog = []
+        self.audio_device_label_to_name = {"系统默认输入": ""}
+        self.audio_selected_device_var = tk.StringVar(value="系统默认输入")
         self.audio_selected_effect_var = tk.StringVar(value="")
         self.audio_selected_effect_enabled_var = tk.BooleanVar(value=False)
         self.audio_effect_description_var = tk.StringVar(value="")
@@ -575,8 +577,21 @@ class YAMLConfigEditor:
         self.audio_controls_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(8, 0))
         self.audio_controls_frame.columnconfigure(0, weight=1)
 
+        device_toolbar = ttk.Frame(self.audio_controls_frame)
+        device_toolbar.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 6))
+        device_toolbar.columnconfigure(1, weight=1)
+        ttk.Label(device_toolbar, text="音频来源:").grid(row=0, column=0, sticky=tk.W)
+        self.audio_device_combo = ttk.Combobox(
+            device_toolbar,
+            textvariable=self.audio_selected_device_var,
+            state="readonly",
+            width=42,
+        )
+        self.audio_device_combo.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(6, 0))
+        self.audio_device_combo.bind("<<ComboboxSelected>>", self.on_audio_device_selected)
+
         effect_toolbar = ttk.Frame(self.audio_controls_frame)
-        effect_toolbar.grid(row=0, column=0, sticky=(tk.W, tk.E))
+        effect_toolbar.grid(row=1, column=0, sticky=(tk.W, tk.E))
         effect_toolbar.columnconfigure(1, weight=1)
         ttk.Label(effect_toolbar, text="编辑效果:").grid(row=0, column=0, sticky=tk.W)
         self.audio_effect_combo = ttk.Combobox(
@@ -616,9 +631,9 @@ class YAMLConfigEditor:
             textvariable=self.audio_effect_description_var,
             foreground="#666666",
             wraplength=680,
-        ).grid(row=1, column=0, sticky=tk.W, pady=(5, 1))
+        ).grid(row=2, column=0, sticky=tk.W, pady=(5, 1))
         audio_summary_frame = ttk.Frame(self.audio_controls_frame)
-        audio_summary_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(0, 6))
+        audio_summary_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=(0, 6))
         audio_summary_frame.columnconfigure(0, weight=1)
         ttk.Label(
             audio_summary_frame,
@@ -632,7 +647,7 @@ class YAMLConfigEditor:
         ).grid(row=0, column=1, sticky=tk.E)
 
         parameter_columns = ttk.Frame(self.audio_controls_frame)
-        parameter_columns.grid(row=3, column=0, sticky=(tk.W, tk.E))
+        parameter_columns.grid(row=4, column=0, sticky=(tk.W, tk.E))
         parameter_columns.columnconfigure(0, weight=1, uniform="audio_settings")
         parameter_columns.columnconfigure(1, weight=1, uniform="audio_settings")
 
@@ -661,7 +676,7 @@ class YAMLConfigEditor:
             text="效果组合预设",
             padding=(8, 5),
         )
-        audio_preset_frame.grid(row=4, column=0, sticky=(tk.W, tk.E), pady=(7, 0))
+        audio_preset_frame.grid(row=5, column=0, sticky=(tk.W, tk.E), pady=(7, 0))
         audio_preset_frame.columnconfigure(1, weight=1)
         ttk.Label(audio_preset_frame, text="预设:").grid(row=0, column=0, sticky=tk.W)
         self.audio_preset_combo = ttk.Combobox(
@@ -1313,6 +1328,24 @@ class YAMLConfigEditor:
             self.audio_effect_label_to_id = {item['label']: item['id'] for item in self.audio_effect_catalog}
             self.audio_effect_config = dict(config.get('effects', {}))
             self.audio_input_catalog = list(audio_ui.get('input_parameters', []))
+            devices = list(audio_ui.get('devices', []))
+            self.audio_device_label_to_name = {"系统默认输入": ""}
+            for device in devices:
+                name = device.get('name')
+                if not isinstance(name, str) or not name:
+                    continue
+                label = name
+                if label in self.audio_device_label_to_name:
+                    label = f"{name} ({device.get('index')})"
+                self.audio_device_label_to_name[label] = name
+            self.audio_device_combo.configure(values=list(self.audio_device_label_to_name))
+            configured_device = config.get('target_device', '')
+            selected_device = next(
+                (label for label, name in self.audio_device_label_to_name.items()
+                 if name == configured_device),
+                "系统默认输入",
+            )
+            self.audio_selected_device_var.set(selected_device)
 
             labels = [item['label'] for item in self.audio_effect_catalog]
             self.audio_effect_combo.configure(values=labels)
@@ -1426,6 +1459,14 @@ class YAMLConfigEditor:
         ]
         summary = "已启用：" + ("、".join(enabled) if enabled else "无（仅显示背景）")
         self.audio_enabled_summary_var.set(summary)
+
+    def on_audio_device_selected(self, event=None):
+        if self.updating_audio_controls:
+            return
+        target_device = self.audio_device_label_to_name.get(self.audio_selected_device_var.get())
+        if target_device is None:
+            return
+        self.apply_audio_runtime_config({'target_device': target_device})
 
     def apply_audio_runtime_config(self, config):
         if self.updating_audio_controls:

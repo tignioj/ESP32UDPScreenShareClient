@@ -51,7 +51,7 @@ elif __file__:
 # cfg = resource_path("config.yaml")
 
 __streamer:Streamer = None
-_AUDIO_CONFIG_KEYS = ("input", "effects")
+_AUDIO_CONFIG_KEYS = ("target_device", "input", "effects")
 _VIDEO_CONFIG_KEYS = (
     "video_path",
     "play_mode",
@@ -169,7 +169,7 @@ def save_source_runtime_config(
     runtime_config: Dict[str, Any],
     config_path: Optional[os.PathLike] = None,
 ) -> Path:
-    """Persist an audio source's current input/effect values atomically."""
+    """Persist an audio source's selected device and effect values atomically."""
     if not source_id:
         raise ValueError("图像源 ID 不能为空")
     values = _audio_runtime_values(runtime_config)
