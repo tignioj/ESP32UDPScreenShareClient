@@ -271,14 +271,46 @@ video_path: D:/Videos/ESP32
 
 程序会在“音频可视化工作台”的“音频来源”下拉框列出所有可录音设备，可在运行中切换并点击“保存参数”记住选择：
 
-- **Mac 系统声音**：安装 [BlackHole](https://existential.audio/blackhole/)，在“音频 MIDI 设置”中创建“多输出设备”，将扬声器/耳机和 BlackHole 一起勾选；随后在本程序中选择 `BlackHole 2ch`。这样既能听到声音，也能做可视化。
 - **指定应用或更复杂混音**：可使用 Loopback 等虚拟音频设备，选择它创建的录音输入。
 - **麦克风、USB 声卡或线路输入**：直接在下拉框选择相应设备即可。首次使用麦克风时，macOS 可能要求在“隐私与安全性 → 麦克风”中授权终端或应用。
 - **Windows 系统声音**：可按下面的 VB-CABLE 方法配置。
 
 如果留空 `target_device`，程序使用操作系统的默认录音设备；程序会自动在设备不支持 48 kHz 时改用其原生采样率。
 
-### 2. Windows：安装并配置 VB-CABLE
+### 2. macOS：用 BlackHole 采集系统声音
+
+BlackHole 是虚拟音频设备。下面的配置会把系统播放声音同时送往扬声器（或耳机）和 BlackHole，因此你仍能听到声音，程序也能生成音频可视化。
+
+1. 安装 BlackHole 2ch。可从 [BlackHole](https://existential.audio/blackhole/) 下载，也可使用 Homebrew：
+
+   ```bash
+   brew install --cask blackhole-2ch
+   ```
+
+2. 如果刚安装完但在设备列表中没有看到 `BlackHole 2ch`，先完全退出本程序并重启 macOS；也可以在终端运行以下命令来重启音频服务，然后重新打开程序：
+
+   ```bash
+   sudo killall coreaudiod
+   ```
+
+3. 打开“应用程序 → 实用工具 → 音频 MIDI 设置”，确认左侧已有 `BlackHole 2ch`。点击左下角 **+**，选择“创建多输出设备”。
+
+4. 在新建的“多输出设备”中，勾选实际使用的扬声器或耳机，以及 `BlackHole 2ch`。将扬声器/耳机设为“主设备”；如设备支持，建议为 BlackHole 勾选“漂移校正”。
+
+5. 打开“系统设置 → 声音 → 输出”，把输出设备改为刚创建的“多输出设备”。此时播放音乐、视频或游戏时，声音会同时进入耳机/扬声器和 BlackHole。
+
+6. 打开本程序，选择 `audio_visualization` 图像源；在“音频可视化工作台 → 音频来源”选择 `BlackHole 2ch`。播放任意声音后，频谱或波形应立即有反应。点击“保存参数”可记住该设备。
+
+> 若只想让某个 App 的声音进入可视化，而不改变全局输出，可在该 App 的音频输出设置中选择 BlackHole，或使用 Loopback 创建应用级路由。
+
+#### macOS 排查
+
+- **列表里没有 BlackHole**：确认“音频 MIDI 设置”是否能看到它；若不能，重启 macOS 后再检查。仅重新打开本程序无法让尚未被 CoreAudio 加载的驱动出现。
+- **有画面但没有响应**：确认系统输出是“多输出设备”，且该设备包含 `BlackHole 2ch`；然后在本程序中选择 `BlackHole 2ch`，而不是“系统默认输入”。
+- **听不到声音**：确认多输出设备中勾选了实际扬声器或耳机，并将其设为主设备。
+- **使用麦克风时无响应**：在“系统设置 → 隐私与安全性 → 麦克风”中允许终端或本应用访问麦克风。
+
+### 3. Windows：安装并配置 VB-CABLE
 
 1. 安装 [VB-CABLE](https://vb-audio.com/Cable/)；
 2. 打开 Windows“设置 → 系统 → 声音”，将播放设备设为 `CABLE Input`；
@@ -290,7 +322,7 @@ video_path: D:/Videos/ESP32
 
 ![侦听 CABLE Output](audio_output_setting.png)
 
-### 3. 配置音频源
+### 4. 配置音频源
 
 ```yaml
 - type: audio_visualization
@@ -320,6 +352,7 @@ video_path: D:/Videos/ESP32
           speed: 1.0
           size: 3.2
           drift: 0.65
+          direction: upward # upward（由下向上）或 inward（四周向内）
 ```
 
 若找不到 `target_device` 指定的设备，程序会尝试使用系统默认录音设备。更推荐从界面下拉框选择，以避免设备名称不完全一致。
