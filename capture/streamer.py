@@ -25,12 +25,15 @@ class Streamer:
 
             # 只初始化设置为True的源
             if src_config.get('enable', True):
-                self.source_manager.create_source(
+                created_source_id = self.source_manager.create_source(
                     source_type=src_type,
                     source_id=src_id,
                     **src_config.get('params', {})
                 )
-                print(f"成功加载配置源{src_id}")
+                if created_source_id:
+                    print(f"成功加载配置源{src_id}")
+                else:
+                    print(f"跳过不可用的配置源:{src_id}")
             else:
                 print(f"没有开启的的配置源:{src_id}")
 
@@ -39,8 +42,20 @@ class Streamer:
         if active_source:
             print(f"正在尝试切换到指定源:{active_source}")
             switch_ok = self.source_manager.switch_source(active_source)
-            if not switch_ok: raise Exception(f'配置源不存在或者初始化失败，请检查配置文件{active_source}')
-            print(f"成功切换到指定源:{active_source}")
+            if switch_ok:
+                print(f"成功切换到指定源:{active_source}")
+            else:
+                available_sources = self.source_manager.list_configured_sources()
+                if not available_sources:
+                    raise RuntimeError("没有任何可用的配置源，请检查 sources 配置和设备连接状态")
+                fallback_source = next(
+                    (source for source in available_sources if source['active']),
+                    available_sources[0],
+                )
+                print(
+                    f"警告：配置源不可用:{active_source}；"
+                    f"已自动使用可用源:{fallback_source['id']}"
+                )
 
         self._initialized = True
         return True
@@ -84,4 +99,3 @@ class Streamer:
         """关闭推流程序"""
         self.source_manager.cleanup()
         self._initialized = False
-

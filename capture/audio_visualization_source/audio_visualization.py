@@ -80,6 +80,17 @@ class AudioVisualizer:
 
     def _initialize_audio_stream(self) -> None:
         try:
+            device = sd.query_devices(self.device_id, "input")
+            max_channels = int(device["max_input_channels"])
+            if max_channels < 1:
+                raise RuntimeError(f"音频设备没有输入声道: {device['name']}")
+            actual_channels = min(self.channels, max_channels)
+            if actual_channels != self.channels:
+                print(
+                    f"音频设备 {device['name']} 最多支持 {max_channels} 个输入声道，"
+                    f"已从 {self.channels} 自动调整为 {actual_channels} 声道"
+                )
+                self.channels = actual_channels
             self.stream = sd.InputStream(
                 device=self.device_id,
                 channels=self.channels,

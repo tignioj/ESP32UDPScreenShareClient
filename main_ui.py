@@ -7,6 +7,7 @@ import re
 import threading
 import time
 import sys
+import queue
 from tkinter import scrolledtext
 import tkinter.font as tkfont
 
@@ -198,6 +199,10 @@ class YAMLConfigEditor:
 
         # 日志文本框
         self.log_text = None
+        # Tk 控件只能在主线程访问。推流线程把日志放入队列，由主线程刷新。
+        self.log_queue = queue.Queue()
+        self.ui_action_queue = queue.Queue()
+        self.log_flush_job = None
 
         self.setup_ui()
         self.refresh_source_list()
@@ -205,6 +210,7 @@ class YAMLConfigEditor:
         self.video_refresh_job = self.root.after(200, self.update_video_playback_status)
         self.video_idle_playback_job = self.root.after(15, self.drive_video_when_not_streaming)
         self.stream_preview_job = self.root.after(100, self.update_stream_preview)
+        self.log_flush_job = self.root.after(100, self.flush_log_messages)
 
         # 绑定关闭事件
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -1615,12 +1621,45 @@ class YAMLConfigEditor:
         })
 
     def log_message(self, message):
-        """添加消息到日志框"""
+        """添加消息到日志框；后台线程不会直接操作 Tk 控件。"""
+        if threading.current_thread() is not threading.main_thread():
+            self.log_queue.put(str(message))
+            return
+        self._append_log_message(message)
+
+    def _append_log_message(self, message):
+        """在 Tk 主线程中将一条日志写入界面。"""
         self.log_text.config(state=tk.NORMAL)
         self.log_text.insert(tk.END, f"[{time.strftime('%H:%M:%S')}] {message}\n")
         self.log_text.see(tk.END)  # 滚动到底部
         self.log_text.config(state=tk.DISABLED)
-        self.root.update_idletasks()  # 立即更新界面
+
+    def flush_log_messages(self):
+        """定时执行后台线程排入的界面操作，并显示它产生的日志。"""
+        try:
+            while True:
+                self.ui_action_queue.get_nowait()()
+        except queue.Empty:
+            pass
+        try:
+            while True:
+                self._append_log_message(self.log_queue.get_nowait())
+        except queue.Empty:
+            pass
+        finally:
+            try:
+                if self.root.winfo_exists():
+                    self.log_flush_job = self.root.after(100, self.flush_log_messages)
+            except tk.TclError:
+                self.log_flush_job = None
+
+    def handle_streaming_failure(self):
+        """在 Tk 主线程中恢复推流控件。"""
+        self.streaming = False
+        self.stop_button.config(state=tk.DISABLED)
+        self.start_button.config(state=tk.NORMAL)
+        self.status_var.set("推流出错")
+        self.clear_stream_preview("推流出错")
 
     def format_udp_preset_label(self, preset_type, preset_name):
         """为下拉框生成带类别的预设名称。"""
@@ -2388,14 +2427,17 @@ class YAMLConfigEditor:
 
         except Exception as e:
             self.log_message(f"推流线程错误: {str(e)}")
-            # 在主线程中更新按钮状态
-            self.root.after(0, lambda: self.stop_button.config(state=tk.DISABLED))
-            self.root.after(0, lambda: self.start_button.config(state=tk.NORMAL))
-            self.root.after(0, lambda: self.status_var.set("推流出错"))
-            self.root.after(0, lambda: self.clear_stream_preview("推流出错"))
+            # 工作线程不能直接调用 Tk，也不能从这里调用 root.after。
+            self.ui_action_queue.put(self.handle_streaming_failure)
 
     def on_closing(self):
         """窗口关闭时的处理"""
+        if self.log_flush_job is not None:
+            try:
+                self.root.after_cancel(self.log_flush_job)
+            except tk.TclError:
+                pass
+            self.log_flush_job = None
         if self.video_refresh_job is not None:
             try:
                 self.root.after_cancel(self.video_refresh_job)
