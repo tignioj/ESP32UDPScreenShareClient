@@ -1,9 +1,27 @@
+import sys
 from typing import Dict, Any, Optional, List
 
 import numpy as np
 
 from capture.interface import SourceType
 from capture.source_manager import SourceManager
+
+
+def _console_print(message: str) -> None:
+    """Print without crashing when the Windows console cannot encode Chinese."""
+    stream = sys.stdout
+    if stream is None:
+        return
+
+    try:
+        print(message, file=stream)
+    except UnicodeEncodeError:
+        encoding = getattr(stream, "encoding", None) or "ascii"
+        escaped_message = message.encode(
+            encoding,
+            errors="backslashreplace",
+        ).decode(encoding)
+        print(escaped_message, file=stream)
 
 
 class Streamer:
@@ -31,19 +49,19 @@ class Streamer:
                     **src_config.get('params', {})
                 )
                 if created_source_id:
-                    print(f"成功加载配置源{src_id}")
+                    _console_print(f"成功加载配置源{src_id}")
                 else:
-                    print(f"跳过不可用的配置源:{src_id}")
+                    _console_print(f"跳过不可用的配置源:{src_id}")
             else:
-                print(f"没有开启的的配置源:{src_id}")
+                _console_print(f"没有开启的的配置源:{src_id}")
 
         # 设置活动源
         active_source = self.config.get('active_source')
         if active_source:
-            print(f"正在尝试切换到指定源:{active_source}")
+            _console_print(f"正在尝试切换到指定源:{active_source}")
             switch_ok = self.source_manager.switch_source(active_source)
             if switch_ok:
-                print(f"成功切换到指定源:{active_source}")
+                _console_print(f"成功切换到指定源:{active_source}")
             else:
                 available_sources = self.source_manager.list_configured_sources()
                 if not available_sources:
@@ -52,7 +70,7 @@ class Streamer:
                     (source for source in available_sources if source['active']),
                     available_sources[0],
                 )
-                print(
+                _console_print(
                     f"警告：配置源不可用:{active_source}；"
                     f"已自动使用可用源:{fallback_source['id']}"
                 )

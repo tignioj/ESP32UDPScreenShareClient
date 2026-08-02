@@ -1,7 +1,18 @@
+import io
 import unittest
 from unittest.mock import patch
 
 from capture.streamer import Streamer
+
+
+class Cp1252Stream(io.StringIO):
+    @property
+    def encoding(self):
+        return "cp1252"
+
+    def write(self, text):
+        text.encode(self.encoding)
+        return super().write(text)
 
 
 class StreamerInitializationTests(unittest.TestCase):
@@ -40,6 +51,21 @@ class StreamerInitializationTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "没有任何可用的配置源"):
             streamer.initialize()
+
+    @patch("capture.streamer.SourceManager")
+    def test_initializes_when_console_cannot_encode_chinese(self, manager_type):
+        manager = manager_type.return_value
+        manager.create_source.return_value = "demo1"
+
+        streamer = Streamer({
+            "sources": [{"type": "demo", "id": "demo1"}],
+        })
+        output = Cp1252Stream()
+
+        with patch("sys.stdout", output):
+            self.assertTrue(streamer.initialize())
+
+        self.assertIn(r"\u6210\u529f", output.getvalue())
 
 
 if __name__ == "__main__":
