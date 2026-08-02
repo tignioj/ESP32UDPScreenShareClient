@@ -12,6 +12,10 @@ class WaveformEffect(AudioEffect):
     default_enabled = False
     order = 10
     parameters = (
+        ParameterSpec(
+            "vertical_position", "垂直位置", 0, 239, 120, 1, 0,
+            "波形中心在 240×240 屏幕中的 Y 坐标（0 为顶部，239 为底部）。",
+        ),
         ParameterSpec("amplitude", "振幅", 0.25, 1.5, 0.82, 0.05, 2),
         ParameterSpec("thickness", "线宽", 1, 6, 2, 1, 0),
         ParameterSpec("smoothing", "平滑", 0.0, 0.95, 0.58, 0.05, 2),
@@ -28,7 +32,7 @@ class WaveformEffect(AudioEffect):
         wave = self.smooth("wave", source[indexes], self.values["smoothing"])
         wave = np.clip(wave * self.values["amplitude"], -1.0, 1.0)
         x = np.arange(width, dtype=np.int32)
-        center = height // 2
+        center = int(np.clip(round(self.values["vertical_position"]), 0, height - 1))
         scale = height * 0.34
         upper = np.column_stack((x, center + wave * scale)).astype(np.int32)
         lower = np.column_stack((x, center - wave * scale * 0.55)).astype(np.int32)

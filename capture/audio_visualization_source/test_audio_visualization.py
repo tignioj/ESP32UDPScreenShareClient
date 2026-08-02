@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, patch
 
 import numpy as np
 
@@ -8,6 +8,7 @@ from capture.audio_visualization_source.audio_visualization_source import AudioV
 from capture.audio_visualization_source.effects.base import AudioFrame
 from capture.audio_visualization_source.effects.ionized_ring import IonizedRingEffect
 from capture.audio_visualization_source.effects.pulse_tunnel import PulseTunnelEffect
+from capture.audio_visualization_source.effects.waveform import WaveformEffect
 from capture.interface import SourceType
 
 
@@ -41,6 +42,32 @@ class AudioVisualizationTests(unittest.TestCase):
         })
         self.assertEqual(0.2, self.visualizer.effects["spectrum_bars"].values["smoothing"])
         self.assertEqual(original_waveform, self.visualizer.effects["waveform"].values)
+
+    @patch("capture.audio_visualization_source.effects.waveform.cv2.line")
+    def test_waveform_vertical_position_uses_screen_y_coordinate(self, draw_line):
+        effect = WaveformEffect()
+        effect.configure({"vertical_position": 42})
+        canvas = np.zeros((240, 240, 3), dtype=np.uint8)
+        frame = AudioFrame(
+            waveform=np.zeros(1024, dtype=np.float32),
+            spectrum=np.zeros(513, dtype=np.float32),
+            sample_rate=48000,
+            block_size=1024,
+            rms=0.0,
+            bass=0.0,
+            beat=0.0,
+            time=0.0,
+        )
+
+        effect.draw(canvas, frame, 1.0 / 30.0)
+
+        draw_line.assert_called_once_with(
+            canvas, (0, 42), (239, 42), (45, 25, 55), 1, ANY
+        )
+        position = next(item for item in effect.metadata()["parameters"]
+                        if item["name"] == "vertical_position")
+        self.assertEqual((0, 239, 120),
+                         (position["min"], position["max"], position["default"]))
 
     def test_ionized_ring_adds_red_and_blue_layers_on_a_beat(self):
         effect = IonizedRingEffect()
