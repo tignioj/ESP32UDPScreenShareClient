@@ -107,9 +107,10 @@ uv run python main_ui.py
 2. 将 UDP 端口保持为接收端使用的端口，推荐固件默认为 `8888`；
 3. 从“UDP 预设”下拉列表选择内置或个人预设，选择后会立即应用；
 4. 在“传输参数”中设置目标发送 FPS；RGB332 可设 1–47，RGB565 可设 1–25.5；
-5. 在“2 图像源配置”页签中选择需要的来源并点击“切换”；
-6. 点击“开始推流”，在右侧查看完成缩放和色彩量化后的实际发送画面，并观察日志中的帧率、包速率和错误信息；
-7. 需要结束时点击“停止推流”。
+5. 在“2 图像源配置”页签中选择需要的来源并点击“切换”，可用独立的“图像源 FPS”控制采集或画面生成频率；
+6. 修改图像源 FPS 后点击“应用并保存”，设置会实时生效并写回 `config_stream.yaml`；
+7. 点击“开始推流”，在右侧查看完成缩放和色彩量化后的实际发送画面，并观察日志中的帧率、包速率和错误信息；
+8. 需要结束时点击“停止推流”。
 
 2 个“内置”预设由程序提供，只能应用，不能修改或删除。调整地址、色彩模式或目标发送 FPS 后，点击“保存为个人预设”即可保存服务器地址、UDP 端口、模式和帧率；可以保存多份，也可以覆盖或删除已选中的个人预设。
 
@@ -154,14 +155,16 @@ streamer:
 
 | `type` | 用途 | 主要参数 |
 | --- | --- | --- |
-| `demo` | 内置测试画面 | 无 |
-| `screen` | 屏幕、区域或窗口截图 | `display_idx`、`region`、`window_title`、`use_mss` |
-| `video_file` | 循环或随机播放目录中的 MP4 视频 | `video_path`、`play_mode`、`playback_rate`、`first_play_video` |
-| `audio_visualization` | 将麦克风、虚拟音频设备或外接输入绘制为动态画面 | `target_device`、`input`、`effects` |
+| `demo` | 内置测试画面 | `fps` |
+| `screen` | 屏幕、区域或窗口截图 | `display_idx`、`region`、`window_title`、`use_mss`、`fps` |
+| `video_file` | 循环或随机播放目录中的 MP4 视频 | `video_path`、`play_mode`、`playback_rate`、`first_play_video`、`fps` |
+| `audio_visualization` | 将麦克风、虚拟音频设备或外接输入绘制为动态画面 | `target_device`、`input`、`effects`、`fps` |
 | `camera` | 本地摄像头 | `camera_idx`、`resolution`、`fps` |
-| `rtsp` | 网络视频流 | `rtsp_url`、`timeout`、`rtsp_transport` |
+| `rtsp` | 网络视频流 | `rtsp_url`、`timeout`、`rtsp_transport`、`fps` |
 
 > `active_source` 必须指向一个已启用且初始化成功的源。无效的视频路径、找不到的窗口、不可连接的 RTSP 地址或不可用的音频设备都可能使对应源初始化失败。暂时不用的源应设置为 `enable: false`。
+
+所有图像源的 `fps` 都可在运行时通过“图像源 FPS”修改，允许范围为 1–120。它控制采集或内容生成频率；“目标发送 FPS”仍独立控制 UDP 整帧发送节奏。实际内容更新率还会受到源自身能力和发送帧率限制。
 
 ### 屏幕截图
 
@@ -262,6 +265,7 @@ video_path: D:/Videos/ESP32
     rtsp_url: rtsp://user:password@192.168.1.100:8554/live
     timeout: 3
     rtsp_transport: tcp
+    fps: 30
 ```
 
 程序启动时会连接所有已启用的 RTSP 源。地址不可用会延长启动时间或导致该源初始化失败，因此不使用时请设置 `enable: false`。

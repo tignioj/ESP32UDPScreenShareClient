@@ -120,6 +120,8 @@ class RTSPSource(ImageSourceInterface):
             bool: 初始化是否成功
         """
         try:
+            if 'fps' in kwargs:
+                self.fps = kwargs['fps']
             # 更新配置
             self.config.update(kwargs)
 

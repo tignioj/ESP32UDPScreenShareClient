@@ -895,6 +895,7 @@ streamer:
                 size: 3.2
                 drift: 0.65
       active_preset: 极光丝幕-波形-粒子
+      fps: 47
   - type: video_file
     id: video_player
     enable: true

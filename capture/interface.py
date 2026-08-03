@@ -1,8 +1,29 @@
 from abc import ABC, abstractmethod
+import math
 from typing import Optional, Tuple, List, Dict, Any
 from enum import Enum
 import numpy as np
 import time
+
+
+MIN_SOURCE_FRAME_RATE = 1.0
+MAX_SOURCE_FRAME_RATE = 120.0
+
+
+def validate_source_frame_rate(value: Any) -> float:
+    """Parse a source frame rate shared by configuration, runtime, and UI code."""
+    try:
+        frame_rate = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("图像源帧率必须是数字") from exc
+    if (
+        not math.isfinite(frame_rate)
+        or not MIN_SOURCE_FRAME_RATE <= frame_rate <= MAX_SOURCE_FRAME_RATE
+    ):
+        raise ValueError(
+            f"图像源帧率必须在 {MIN_SOURCE_FRAME_RATE:g}-{MAX_SOURCE_FRAME_RATE:g} FPS 之间"
+        )
+    return frame_rate
 
 
 class SourceType(Enum):
@@ -33,7 +54,7 @@ class ImageSourceInterface(ABC):
     @fps.setter
     def fps(self, value: float):
         """设置帧率"""
-        self._fps = max(1.0, min(value, 120.0))
+        self._fps = validate_source_frame_rate(value)
 
     @abstractmethod
     def initialize(self, **kwargs) -> bool:

@@ -34,8 +34,8 @@ class CameraSource(ImageSourceInterface):
 
             # 设置其他参数
             if 'fps' in kwargs:
-                self._cap.set(cv2.CAP_PROP_FPS, kwargs['fps'])
-                self._fps = kwargs['fps']
+                self.fps = kwargs['fps']
+                self._cap.set(cv2.CAP_PROP_FPS, self._fps)
 
             # 获取实际分辨率
             width = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -134,7 +134,7 @@ class CameraSource(ImageSourceInterface):
             success &= self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
 
         if 'fps' in config:
-            self._fps = config['fps']
+            self.fps = config['fps']
             success &= self._cap.set(cv2.CAP_PROP_FPS, self._fps)
 
         return success

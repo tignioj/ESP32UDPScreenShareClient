@@ -109,6 +109,14 @@ class Streamer:
         """Return the active image source's intended frame rate."""
         return self.source_manager.get_source_frame_rate()
 
+    def get_source_frame_rate(self, source_id: str = None) -> float:
+        """Return one configured source's intended frame rate."""
+        return self.source_manager.get_source_frame_rate(source_id)
+
+    def set_source_frame_rate(self, frame_rate: object, source_id: str = None) -> float:
+        """Update one source's frame rate without restarting the stream."""
+        return self.source_manager.set_source_frame_rate(frame_rate, source_id)
+
     def get_source_preview(self, source_id: str = None) -> Optional[np.ndarray]:
         """获取图像源最近缓存的预览画面。"""
         return self.source_manager.get_source_preview(source_id)

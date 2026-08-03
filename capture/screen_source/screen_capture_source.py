@@ -38,8 +38,11 @@ class ScreenCaptureSource(ImageSourceInterface):
         else:
             raise RuntimeError(f"Unsupported platform: {system}")
 
-        # 应用配置
-        return self._impl.initialize(**kwargs)
+        # 应用配置，并让包装层向发送管线暴露平台实现的真实目标帧率。
+        initialized = self._impl.initialize(**kwargs)
+        if initialized:
+            self.fps = self._impl.fps
+        return initialized
 
     def capture(self) -> Optional[np.ndarray]:
         if not self._is_running or not self._impl:
@@ -88,7 +91,10 @@ class ScreenCaptureSource(ImageSourceInterface):
     def set_config(self, config: Dict[str, Any]) -> bool:
         if not self._impl:
             return False
-        return self._impl.set_config(config)
+        updated = self._impl.set_config(config)
+        if 'fps' in config:
+            self.fps = self._impl.fps
+        return updated
 
     def release(self):
         if self._impl:

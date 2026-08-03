@@ -3,6 +3,8 @@ import unittest
 from unittest.mock import patch
 
 from capture.streamer import Streamer
+from capture.interface import SourceType
+from capture.source_manager import SourceManager
 
 
 class Cp1252Stream(io.StringIO):
@@ -65,7 +67,25 @@ class StreamerInitializationTests(unittest.TestCase):
         with patch("sys.stdout", output):
             self.assertTrue(streamer.initialize())
 
-        self.assertIn(r"\u6210\u529f", output.getvalue())
+            self.assertIn(r"\u6210\u529f", output.getvalue())
+
+
+class SourceFrameRateTests(unittest.TestCase):
+    def test_updates_demo_source_frame_rate_at_runtime(self):
+        manager = SourceManager()
+        self.assertEqual("demo1", manager.create_source(SourceType.DEMO, "demo1", fps=24))
+
+        self.assertEqual(24.0, manager.get_source_frame_rate("demo1"))
+        self.assertEqual(47.5, manager.set_source_frame_rate(47.5, "demo1"))
+        self.assertEqual(47.5, manager.get_source_frame_rate("demo1"))
+        self.assertEqual(47.5, manager.get_source_info("demo1")["fps"])
+
+    def test_rejects_an_invalid_runtime_frame_rate(self):
+        manager = SourceManager()
+        manager.create_source(SourceType.DEMO, "demo1")
+
+        with self.assertRaisesRegex(ValueError, "1-120"):
+            manager.set_source_frame_rate(121, "demo1")
 
 
 if __name__ == "__main__":

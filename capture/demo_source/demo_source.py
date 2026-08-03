@@ -10,6 +10,8 @@ class DemoSource(ImageSourceInterface):
         super().__init__(source_type, source_id)
 
     def initialize(self, **kwargs) -> bool:
+        if 'fps' in kwargs:
+            self.fps = kwargs['fps']
         return True
 
     def capture(self) -> Optional[np.ndarray]:
@@ -32,8 +34,29 @@ class DemoSource(ImageSourceInterface):
             image[:, start_x:end_x] = colors[i]
         return image
 
-    def get_info(self) -> Dict[str, Any]:pass
-    def get_available_configs(self) -> List[Dict[str, Any]]: pass
+    def get_info(self) -> Dict[str, Any]:
+        return {
+            'source_type': self.source_type.value,
+            'source_id': self.source_id,
+            'fps': self.fps,
+        }
 
-    def set_config(self, config: Dict[str, Any]) -> bool: pass
-    def release(self): pass
+    def get_available_configs(self) -> List[Dict[str, Any]]:
+        return [
+            {
+                'name': 'fps',
+                'type': 'float',
+                'description': '帧率',
+                'default': 30.0,
+                'range': '1.0-120.0',
+            }
+        ]
+
+    def set_config(self, config: Dict[str, Any]) -> bool:
+        if 'fps' not in config:
+            return False
+        self.fps = config['fps']
+        return True
+
+    def release(self):
+        pass

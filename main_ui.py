@@ -32,8 +32,14 @@ try:
         load_audio_presets,
         save_active_audio_preset,
         save_audio_preset,
+        save_source_frame_rate,
         save_source_runtime_config,
         save_video_source_config,
+    )
+    from capture.interface import (
+        MAX_SOURCE_FRAME_RATE,
+        MIN_SOURCE_FRAME_RATE,
+        validate_source_frame_rate,
     )
     streamer = get_streamer()
 
@@ -129,6 +135,8 @@ class YAMLConfigEditor:
         self.source_canvas = None
         self.source_content = None
         self.source_window = None
+        self.source_fps_var = tk.StringVar(value="30")
+        self.updating_source_fps_control = False
 
         # 屏幕截图源运行时控制。
         self.screen_mode_var = tk.StringVar(value="")
@@ -379,9 +387,42 @@ class YAMLConfigEditor:
         )
         self.switch_source_button.grid(row=0, column=2, padx=(5, 0))
 
+        source_fps_frame = ttk.Frame(source_frame)
+        source_fps_frame.grid(
+            row=1,
+            column=0,
+            columnspan=3,
+            sticky=(tk.W, tk.E),
+            pady=(8, 0),
+        )
+        source_fps_frame.columnconfigure(1, weight=1)
+        ttk.Label(source_fps_frame, text="图像源 FPS:").grid(row=0, column=0, sticky=tk.W)
+        self.source_fps_spinbox = ttk.Spinbox(
+            source_fps_frame,
+            from_=MIN_SOURCE_FRAME_RATE,
+            to=MAX_SOURCE_FRAME_RATE,
+            increment=1,
+            textvariable=self.source_fps_var,
+            width=10,
+            command=self.apply_source_frame_rate,
+        )
+        self.source_fps_spinbox.grid(row=0, column=1, sticky=tk.W, padx=(8, 8))
+        self.source_fps_spinbox.bind('<Return>', self.apply_source_frame_rate)
+        self.source_fps_apply_button = ttk.Button(
+            source_fps_frame,
+            text="应用并保存",
+            command=self.apply_source_frame_rate,
+        )
+        self.source_fps_apply_button.grid(row=0, column=2, sticky=tk.E)
+        ttk.Label(
+            source_fps_frame,
+            text="控制当前图像源的采集/生成频率；UDP 发送帧率在发送配置页单独设置。",
+            foreground="#777777",
+        ).grid(row=1, column=0, columnspan=3, sticky=tk.W, pady=(4, 0))
+
         # 仅在选中 screen 源时显示，修改后直接作用于运行中的截图源。
         self.screen_controls_frame = ttk.LabelFrame(source_frame, text="截图区域（实时生效）", padding="6")
-        self.screen_controls_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(8, 0))
+        self.screen_controls_frame.grid(row=2, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(8, 0))
         self.screen_controls_frame.columnconfigure(1, weight=1)
 
         ttk.Label(self.screen_controls_frame, text="当前模式:").grid(row=0, column=0, sticky=tk.W)
@@ -425,7 +466,7 @@ class YAMLConfigEditor:
 
         # 仅在选中 video_file 源时显示，播放参数可实时应用并保存。
         self.video_controls_frame = ttk.LabelFrame(source_frame, text="本地视频播放", padding="8")
-        self.video_controls_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(8, 0))
+        self.video_controls_frame.grid(row=2, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(8, 0))
         self.video_controls_frame.columnconfigure(1, weight=1)
 
         ttk.Label(self.video_controls_frame, text="视频路径:").grid(row=0, column=0, sticky=tk.W)
@@ -550,7 +591,7 @@ class YAMLConfigEditor:
 
         # 音频工作台由效果模块的元数据动态生成。
         self.audio_controls_frame = ttk.LabelFrame(source_frame, text="音频可视化工作台（实时生效）", padding="8")
-        self.audio_controls_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(8, 0))
+        self.audio_controls_frame.grid(row=2, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(8, 0))
         self.audio_controls_frame.columnconfigure(0, weight=1)
 
         device_toolbar = ttk.Frame(self.audio_controls_frame)
@@ -806,6 +847,7 @@ class YAMLConfigEditor:
         if not UDP_MODULES_AVAILABLE or streamer is None:
             self.source_combo.configure(values=(), state=tk.DISABLED)
             self.switch_source_button.configure(state=tk.DISABLED)
+            self.set_source_fps_control_enabled(False)
             self.screen_controls_frame.grid_remove()
             self.video_controls_frame.grid_remove()
             self.audio_controls_frame.grid_remove()
@@ -829,6 +871,7 @@ class YAMLConfigEditor:
                 self.source_combo.configure(state="readonly")
                 self.switch_source_button.configure(state=tk.NORMAL)
                 self.source_var.set(active_label or labels[0])
+                self.refresh_source_fps_control()
                 self.refresh_screen_controls()
                 self.refresh_video_controls()
                 self.refresh_audio_controls()
@@ -837,6 +880,7 @@ class YAMLConfigEditor:
                 self.source_combo.configure(state=tk.DISABLED)
                 self.switch_source_button.configure(state=tk.DISABLED)
                 self.source_var.set("")
+                self.set_source_fps_control_enabled(False)
                 self.screen_controls_frame.grid_remove()
                 self.video_controls_frame.grid_remove()
                 self.audio_controls_frame.grid_remove()
@@ -844,6 +888,7 @@ class YAMLConfigEditor:
         except Exception as e:
             self.source_combo.configure(values=(), state=tk.DISABLED)
             self.switch_source_button.configure(state=tk.DISABLED)
+            self.set_source_fps_control_enabled(False)
             self.screen_controls_frame.grid_remove()
             self.video_controls_frame.grid_remove()
             self.audio_controls_frame.grid_remove()
@@ -865,6 +910,7 @@ class YAMLConfigEditor:
             if streamer.switch_source(source_id):
                 self.log_message(f"已切换图像源: {source_id}")
                 self.status_var.set(f"当前图像源: {source_id}")
+                self.refresh_source_fps_control()
                 self.refresh_screen_controls()
                 self.refresh_video_controls()
                 self.refresh_audio_controls()
@@ -878,6 +924,57 @@ class YAMLConfigEditor:
 
     def get_selected_source_id(self):
         return self.source_id_by_label.get(self.source_var.get())
+
+    def set_source_fps_control_enabled(self, enabled):
+        state = tk.NORMAL if enabled else tk.DISABLED
+        self.source_fps_spinbox.configure(state=state)
+        self.source_fps_apply_button.configure(state=state)
+
+    def refresh_source_fps_control(self):
+        """Load the selected source's runtime FPS into the shared control."""
+        source_id = self.get_selected_source_id()
+        if not source_id or streamer is None:
+            self.set_source_fps_control_enabled(False)
+            return
+
+        self.updating_source_fps_control = True
+        try:
+            frame_rate = streamer.get_source_frame_rate(source_id)
+            self.source_fps_var.set(f"{frame_rate:g}")
+            self.set_source_fps_control_enabled(True)
+        except Exception as e:
+            self.set_source_fps_control_enabled(False)
+            self.log_message(f"读取图像源帧率失败: {str(e)}")
+        finally:
+            self.updating_source_fps_control = False
+
+    def apply_source_frame_rate(self, event=None):
+        """Apply and persist the selected source's capture/render cadence."""
+        if self.updating_source_fps_control:
+            return False
+        source_id = self.get_selected_source_id()
+        if not source_id or streamer is None:
+            return False
+
+        try:
+            frame_rate = validate_source_frame_rate(self.source_fps_var.get())
+            previous_rate = streamer.get_source_frame_rate(source_id)
+            applied_rate = streamer.set_source_frame_rate(frame_rate, source_id)
+            try:
+                save_source_frame_rate(source_id, applied_rate)
+            except Exception:
+                streamer.set_source_frame_rate(previous_rate, source_id)
+                raise
+            self.source_fps_var.set(f"{applied_rate:g}")
+            self.status_var.set(f"图像源 FPS: {applied_rate:g}")
+            self.log_message(
+                f"已更新图像源 {source_id} 的帧率: {applied_rate:g} FPS"
+            )
+            return True
+        except Exception as e:
+            messagebox.showerror("图像源帧率无效", str(e))
+            self.refresh_source_fps_control()
+            return False
 
     def refresh_screen_controls(self):
         """按当前屏幕源的真实运行时参数刷新区域控制面板。"""

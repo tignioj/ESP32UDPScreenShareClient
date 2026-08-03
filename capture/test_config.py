@@ -10,6 +10,7 @@ from capture.config import (
     load_audio_presets,
     save_active_audio_preset,
     save_audio_preset,
+    save_source_frame_rate,
     save_source_runtime_config,
     save_video_source_config,
 )
@@ -68,6 +69,28 @@ class ConfigPersistenceTests(unittest.TestCase):
             self.assertEqual(runtime_config["input"], audio["params"]["input"])
             self.assertEqual(runtime_config["effects"], audio["params"]["effects"])
             self.assertEqual({"fps": 30}, screen["params"])
+
+    def test_saves_source_frame_rate_without_changing_other_parameters(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write_config(directory)
+
+            save_source_frame_rate("screen_one", 47.5, path)
+
+            document = yaml.safe_load(path.read_text(encoding="utf-8"))
+            audio, screen, video = document["streamer"]["sources"]
+            self.assertEqual(47.5, screen["params"]["fps"])
+            self.assertEqual("CABLE Output", audio["params"]["target_device"])
+            self.assertEqual("old_videos", video["params"]["video_path"])
+
+    def test_rejects_invalid_source_frame_rate_without_changing_the_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write_config(directory)
+            original = path.read_text(encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "1-120"):
+                save_source_frame_rate("screen_one", 0, path)
+
+            self.assertEqual(original, path.read_text(encoding="utf-8"))
 
     def test_rejects_a_missing_source_without_changing_the_file(self):
         with tempfile.TemporaryDirectory() as directory:

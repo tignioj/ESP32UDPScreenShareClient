@@ -35,6 +35,7 @@ from typing import Any, Dict, Optional
 import cv2
 import yaml
 
+from capture.interface import validate_source_frame_rate
 from capture.streamer import Streamer
 application_path = '.'
 if getattr(sys, 'frozen', False):
@@ -116,6 +117,22 @@ def _find_video_source(document: Dict[str, Any], source_id: str) -> Dict[str, An
     return source
 
 
+def _find_source(document: Dict[str, Any], source_id: str) -> Dict[str, Any]:
+    source = next(
+        (
+            item for item in document['streamer']['sources']
+            if isinstance(item, dict) and item.get('id') == source_id
+        ),
+        None,
+    )
+    if source is None:
+        raise ValueError(f"配置文件中找不到图像源: {source_id}")
+    params = source.setdefault('params', {})
+    if not isinstance(params, dict):
+        raise ValueError(f"图像源 {source_id} 的 params 必须是对象")
+    return source
+
+
 def _write_stream_config(path: Path, document: Dict[str, Any]) -> Path:
     """Atomically replace a stream configuration file."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -180,6 +197,22 @@ def save_source_runtime_config(
     # Saving raw runtime values means the source should resume these custom
     # values instead of re-applying an older named preset on next startup.
     source['params'].pop('active_preset', None)
+    return _write_stream_config(path, document)
+
+
+def save_source_frame_rate(
+    source_id: str,
+    frame_rate: object,
+    config_path: Optional[os.PathLike] = None,
+) -> Path:
+    """Persist one source's target frame rate without changing its other settings."""
+    if not source_id:
+        raise ValueError("图像源 ID 不能为空")
+    rate = validate_source_frame_rate(frame_rate)
+    path = Path(config_path) if config_path is not None else get_stream_config_path()
+    document = _load_stream_config(path)
+    source = _find_source(document, source_id)
+    source['params']['fps'] = int(rate) if rate.is_integer() else rate
     return _write_stream_config(path, document)
 
 

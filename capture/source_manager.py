@@ -6,7 +6,11 @@ import numpy as np
 from capture.demo_source.demo_source import DemoSource
 from capture.camera_source.camera_source import CameraSource
 from capture.rtsp_source.rtsp_source import RTSPSource
-from capture.interface import SourceType, ImageSourceInterface
+from capture.interface import (
+    ImageSourceInterface,
+    SourceType,
+    validate_source_frame_rate,
+)
 from capture.screen_source.screen_capture_source import ScreenCaptureSource
 from capture.video_source.video_source import VideoFileSource
 from capture.audio_visualization_source.audio_visualization_source import AudioVisualizationSource
@@ -160,6 +164,22 @@ class SourceManager:
         with self._source_lock:
             source = self.get_source(source_id)
             return float(source.fps) if source else 30.0
+
+    def set_source_frame_rate(self, frame_rate: object, source_id: str = None) -> float:
+        """Update the source cadence and any source-specific timing state."""
+        rate = validate_source_frame_rate(frame_rate)
+        with self._source_lock:
+            source = self.get_source(source_id)
+            if source is None:
+                raise ValueError(f"图像源不存在或不可用: {source_id}")
+
+            # The common property controls stream_latest_frames. Sources such as
+            # video and screen capture also keep their own timing state, so give
+            # their existing configuration hook the same value as a best effort.
+            source.fps = rate
+            source.set_config({'fps': rate})
+            source.fps = rate
+            return rate
 
     def get_source_preview(self, source_id: str = None) -> Optional[np.ndarray]:
         """读取图像源缓存的预览帧，不推进播放位置。"""

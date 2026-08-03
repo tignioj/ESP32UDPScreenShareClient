@@ -36,6 +36,8 @@ class AudioVisualizationSource(ImageSourceInterface):
         self._config_lock = threading.RLock()
 
     def initialize(self, **kwargs) -> bool:
+        if "fps" in kwargs:
+            self.fps = kwargs["fps"]
         options = {
             "width": 240,
             "height": 240,
@@ -84,6 +86,7 @@ class AudioVisualizationSource(ImageSourceInterface):
         return {
             "source_id": self.source_id,
             "source_type": self.source_type.value,
+            "fps": self.fps,
             "running": self._is_running,
             "config": config,
             "audio_ui": {
@@ -163,6 +166,9 @@ class AudioVisualizationSource(ImageSourceInterface):
         if self.visualizer is None or not isinstance(config, dict):
             return False
         try:
+            handled_fps = "fps" in config
+            if handled_fps:
+                self.fps = config["fps"]
             target_device = config.get("target_device")
             handled_device = target_device is not None
             if target_device is not None:
@@ -171,7 +177,7 @@ class AudioVisualizationSource(ImageSourceInterface):
                 with self._config_lock:
                     self.visualizer.select_input_device(target_device)
             translated = self._translate_config(config)
-            if not translated and config and not handled_device:
+            if not translated and config and not handled_device and not handled_fps:
                 return False
             with self._config_lock:
                 self.visualizer.configure(translated)
