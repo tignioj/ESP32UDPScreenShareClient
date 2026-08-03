@@ -18,9 +18,12 @@ try:
     from udp_v2 import (
         MODE_RGB332,
         MODE_RGB565,
+        MIN_FRAME_RATE_LIMIT,
         V2Sender,
+        default_frame_rate_limit,
         migrate_v2_config,
         stream_latest_frames,
+        validate_frame_rate_limit,
     )
     from capture.config import (
         delete_audio_preset,
@@ -78,10 +81,12 @@ class YAMLConfigEditor:
             "240 高帧率 RGB332": {
                 'resolution': 240,
                 'color_mode': MODE_RGB332,
+                'target_fps': default_frame_rate_limit(MODE_RGB332),
             },
             "240 高画质 RGB565": {
                 'resolution': 240,
                 'color_mode': MODE_RGB565,
+                'target_fps': default_frame_rate_limit(MODE_RGB565),
             }
         }
         self.default_preset_name = "240 高帧率 RGB332"
@@ -97,6 +102,7 @@ class YAMLConfigEditor:
             'server_port': 8888,
             'resolution': [default_preset['resolution'], default_preset['resolution']],
             'color_mode': "rgb565" if default_preset['color_mode'] == MODE_RGB565 else "rgb332",
+            'target_fps': default_preset['target_fps'],
             'transport_version': 2,
             'preset': self.default_preset_name,
         }
@@ -319,14 +325,29 @@ class YAMLConfigEditor:
         )
         self.entries['color_mode'].grid(row=0, column=3, sticky=(tk.W, tk.E), padx=(8, 0), pady=3)
 
+        ttk.Label(transport_frame, text="目标发送 FPS:").grid(row=1, column=0, sticky=tk.W, pady=3)
+        self.entries['target_fps'] = ttk.Spinbox(
+            transport_frame,
+            from_=MIN_FRAME_RATE_LIMIT,
+            to=default_frame_rate_limit(MODE_RGB332),
+            increment=0.5,
+            width=13,
+            command=self.on_udp_parameter_edited,
+        )
+        self.entries['target_fps'].grid(
+            row=1, column=1, sticky=(tk.W, tk.E), padx=(8, 20), pady=3
+        )
+
         ttk.Label(
             transport_frame,
-            text="UDP v2 固定使用 MTU 满载图像块，并根据 ESP32 实时反馈自动调速。",
+            text="目标 FPS 控制整帧发送节奏；RGB332 上限 47，RGB565 上限 25.5。",
             foreground="#777777",
-        ).grid(row=1, column=0, columnspan=4, sticky=tk.W, pady=(6, 0))
+        ).grid(row=2, column=0, columnspan=4, sticky=tk.W, pady=(6, 0))
 
-        for key in ('resolution', 'color_mode'):
-            self.entries[key].bind("<<ComboboxSelected>>", self.on_udp_parameter_edited)
+        self.entries['resolution'].bind("<<ComboboxSelected>>", self.on_udp_parameter_edited)
+        self.entries['color_mode'].bind("<<ComboboxSelected>>", self.on_color_mode_edited)
+        self.entries['target_fps'].bind("<KeyRelease>", self.on_udp_parameter_edited)
+        self.entries['target_fps'].bind("<FocusOut>", self.on_udp_parameter_edited)
         for key in ('server_ip', 'server_port'):
             self.entries[key].bind("<KeyRelease>", self.on_udp_parameter_edited)
 
@@ -1703,11 +1724,18 @@ class YAMLConfigEditor:
             if not isinstance(raw_config, dict):
                 continue
             try:
+                color_mode = str(raw_config['color_mode'])
                 config = {
                     'server_ip': str(raw_config['server_ip']),
                     'server_port': int(raw_config['server_port']),
                     'resolution': [240, 240],
-                    'color_mode': str(raw_config['color_mode']),
+                    'color_mode': color_mode,
+                    'target_fps': validate_frame_rate_limit(
+                        raw_config.get(
+                            'target_fps', default_frame_rate_limit(color_mode)
+                        ),
+                        color_mode,
+                    ),
                     'transport_version': 2,
                 }
             except (KeyError, TypeError, ValueError):
@@ -1727,6 +1755,7 @@ class YAMLConfigEditor:
                 first.get('server_ip') == second.get('server_ip')
                 and int(first.get('server_port')) == int(second.get('server_port'))
                 and first.get('color_mode') == second.get('color_mode')
+                and abs(float(first.get('target_fps')) - float(second.get('target_fps'))) < 1e-6
             )
         except (TypeError, ValueError):
             return False
@@ -1748,7 +1777,7 @@ class YAMLConfigEditor:
             color = "RGB565 高画质" if preset['color_mode'] == "rgb565" else "RGB332 高帧率"
             self.preset_summary_var.set(
                 f"个人 · {preset['server_ip']}:{preset['server_port']} · "
-                f"240 × 240 · {color} · V2 反馈闭环"
+                f"240 × 240 · {color} · {preset['target_fps']:.1f} FPS · V2 反馈闭环"
             )
             return
         if preset_type != "builtin":
@@ -1757,7 +1786,8 @@ class YAMLConfigEditor:
         preset = self.presets[preset_name]
         color = "RGB565 高画质" if preset['color_mode'] == MODE_RGB565 else "RGB332 高帧率"
         self.preset_summary_var.set(
-            f"内置只读 · 240 × 240 · {color} · V2 反馈闭环"
+            f"内置只读 · 240 × 240 · {color} · "
+            f"{preset['target_fps']:.1f} FPS · V2 反馈闭环"
         )
 
     def get_matching_preset(self, config):
@@ -1766,6 +1796,7 @@ class YAMLConfigEditor:
             color = "rgb565" if preset['color_mode'] == MODE_RGB565 else "rgb332"
             if (
                 config.get('color_mode') == color
+                and abs(float(config.get('target_fps')) - preset['target_fps']) < 1e-6
             ):
                 return name
         return None
@@ -1777,8 +1808,34 @@ class YAMLConfigEditor:
             'server_port': int(self.entries['server_port'].get()),
             'resolution': [240, 240],
             'color_mode': self.entries['color_mode'].get(),
+            'target_fps': float(self.entries['target_fps'].get()),
             'transport_version': 2,
         }
+
+    def set_target_fps_control(self, color_mode, target_fps):
+        """Update the spinbox range and value without changing preset state."""
+        maximum = default_frame_rate_limit(color_mode)
+        target_fps = validate_frame_rate_limit(target_fps, color_mode)
+        self.entries['target_fps'].configure(
+            from_=MIN_FRAME_RATE_LIMIT,
+            to=maximum,
+        )
+        self.entries['target_fps'].delete(0, tk.END)
+        self.entries['target_fps'].insert(0, f"{target_fps:g}")
+
+    def on_color_mode_edited(self, event=None):
+        """Keep a custom FPS when valid, otherwise use the new mode's safe maximum."""
+        if self.updating_udp_controls:
+            return
+        color_mode = self.entries['color_mode'].get()
+        try:
+            target_fps = validate_frame_rate_limit(
+                self.entries['target_fps'].get(), color_mode
+            )
+        except ValueError:
+            target_fps = default_frame_rate_limit(color_mode)
+        self.set_target_fps_control(color_mode, target_fps)
+        self.on_udp_parameter_edited()
 
     def on_udp_parameter_edited(self, event=None):
         """手动修改传输参数后同步预设下拉框状态。"""
@@ -1832,12 +1889,15 @@ class YAMLConfigEditor:
                 self.entries['server_port'].insert(0, str(preset['server_port']))
                 resolution = preset['resolution']
                 color_mode = preset['color_mode']
+                target_fps = preset['target_fps']
             else:
                 resolution = [preset['resolution'], preset['resolution']]
                 color_mode = "rgb565" if preset['color_mode'] == MODE_RGB565 else "rgb332"
+                target_fps = preset['target_fps']
 
             self.entries['resolution'].set(f"[{resolution[0]},{resolution[1]}]")
             self.entries['color_mode'].set(color_mode)
+            self.set_target_fps_control(color_mode, target_fps)
 
             self.preset_var.set(preset_label)
             self.update_preset_summary(preset_label)
@@ -1881,7 +1941,12 @@ class YAMLConfigEditor:
                 self.entries['server_port'].insert(0, str(config.get('server_port', self.default_config['server_port'])))
 
                 self.entries['resolution'].set("[240,240]")
-                self.entries['color_mode'].set(config.get('color_mode', self.default_config['color_mode']))
+                color_mode = config.get('color_mode', self.default_config['color_mode'])
+                self.entries['color_mode'].set(color_mode)
+                self.set_target_fps_control(
+                    color_mode,
+                    config.get('target_fps', default_frame_rate_limit(color_mode)),
+                )
             finally:
                 self.updating_udp_controls = False
 
@@ -1950,6 +2015,16 @@ class YAMLConfigEditor:
         color = self.entries['color_mode'].get()
         if color not in self.valid_values['color_mode']:
             errors.append("请选择有效的色彩模式")
+        else:
+            try:
+                validate_frame_rate_limit(
+                    self.entries['target_fps'].get(), color
+                )
+            except ValueError:
+                maximum = default_frame_rate_limit(color)
+                errors.append(
+                    f"目标发送帧率必须在 {MIN_FRAME_RATE_LIMIT:g}-{maximum:g} FPS 之间"
+                )
 
         return errors
 
@@ -2097,18 +2172,19 @@ class YAMLConfigEditor:
 
         width = 240
         color_mode_str = self.entries['color_mode'].get()
+        target_fps = float(self.entries['target_fps'].get())
 
         # 开始推流线程
         self.clear_stream_preview("等待第一帧")
         self.stream_preview_info_var.set(
-            f"正在启动 · {width}×{width} · {color_mode_str.upper()}"
+            f"正在启动 · {width}×{width} · {color_mode_str.upper()} · {target_fps:g} FPS"
         )
         self.streaming = True
         stop_event = threading.Event()
         self.stream_stop_event = stop_event
         self.stream_thread = threading.Thread(
             target=self.stream_udp_data,
-            args=(server_ip, server_port, color_mode_str, stop_event),
+            args=(server_ip, server_port, color_mode_str, target_fps, stop_event),
             daemon=True
         )
         self.stream_thread.start()
@@ -2192,7 +2268,14 @@ class YAMLConfigEditor:
             except tk.TclError:
                 self.stream_preview_job = None
 
-    def stream_udp_data(self, server_ip, server_port, color_mode_str, stop_event):
+    def stream_udp_data(
+        self,
+        server_ip,
+        server_port,
+        color_mode_str,
+        target_fps,
+        stop_event,
+    ):
         """Run the UDP v2 capture, encoder, pacer, and feedback loop."""
         try:
             mode = self.get_color_mode_code(color_mode_str)
@@ -2214,7 +2297,12 @@ class YAMLConfigEditor:
                     f"P95 {latency}, 堆 {snapshot.free_heap} B"
                 )
 
-            with V2Sender(server_ip, server_port, mode) as sender:
+            with V2Sender(
+                server_ip,
+                server_port,
+                mode,
+                frame_rate_limit=target_fps,
+            ) as sender:
                 self.log_message(
                     f"UDP v2 会话 {sender.session_id:08x}: 240x240 {color_mode_str.upper()}, "
                     f"包内节拍 {sender.pacer.rate_mbps:.1f} Mbit/s, "

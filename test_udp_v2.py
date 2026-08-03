@@ -15,13 +15,16 @@ from udp_v2 import (
     MODE_RGB332,
     MODE_RGB565,
     PAYLOAD_SIZE,
+    V2Sender,
     capture_rate_for_frame_limit,
+    default_frame_rate_limit,
     encode_frame_bgr,
     make_data_packet,
     migrate_v2_config,
     packetize_frame,
     parse_feedback,
     stream_latest_frames,
+    validate_frame_rate_limit,
     _u32_at_or_before,
     _u32_delta,
 )
@@ -97,6 +100,23 @@ class ProtocolV2Tests(unittest.TestCase):
         self.assertAlmostEqual(29.325, capture_rate_for_frame_limit(25.5))
         self.assertEqual(30.0, capture_rate_for_frame_limit(47.0, 30.0))
         self.assertEqual(60.0, capture_rate_for_frame_limit(120.0))
+
+    def test_frame_rate_limits_use_validated_mode_working_points(self):
+        self.assertEqual(47.0, default_frame_rate_limit(MODE_RGB332))
+        self.assertEqual(25.5, default_frame_rate_limit("rgb565"))
+        self.assertEqual(20.0, validate_frame_rate_limit("20", MODE_RGB565))
+        with self.assertRaises(ValueError):
+            validate_frame_rate_limit(26.0, MODE_RGB565)
+        with self.assertRaises(ValueError):
+            validate_frame_rate_limit(0, MODE_RGB332)
+
+    def test_sender_uses_the_requested_frame_period(self):
+        sender = V2Sender("127.0.0.1", 9, MODE_RGB332, frame_rate_limit=20)
+        try:
+            self.assertEqual(20.0, sender.frame_rate_limit)
+            self.assertEqual(50_000_000, sender._frame_period_ns)
+        finally:
+            sender.close()
 
     def test_sender_reuses_latest_payload_when_source_rate_is_lower(self):
         stop_event = threading.Event()
@@ -194,9 +214,25 @@ class ConfigMigrationTests(unittest.TestCase):
         }, defaults)
         self.assertEqual([240, 240], migrated["resolution"])
         self.assertEqual("rgb565", migrated["color_mode"])
+        self.assertEqual(25.5, migrated["target_fps"])
         self.assertEqual(2, migrated["transport_version"])
         self.assertNotIn("lines_per_packet", migrated)
         self.assertNotIn("udp_interval", migrated)
+
+    def test_custom_target_fps_is_migrated_and_invalid_values_fall_back(self):
+        defaults = {
+            "server_ip": "192.168.1.2",
+            "server_port": 8888,
+            "color_mode": "rgb332",
+        }
+        migrated = migrate_v2_config(
+            {"color_mode": "rgb332", "target_fps": "30"}, defaults
+        )
+        self.assertEqual(30.0, migrated["target_fps"])
+        invalid = migrate_v2_config(
+            {"color_mode": "rgb565", "target_fps": 40}, defaults
+        )
+        self.assertEqual(25.5, invalid["target_fps"])
 
 
 if __name__ == "__main__":

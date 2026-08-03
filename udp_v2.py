@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
+import math
 import secrets
 import select
 import socket
@@ -48,6 +49,11 @@ FRAME_PAYLOAD_SIZE = {
 CAPTURE_RATE_HEADROOM = 1.15
 MAX_CAPTURE_RATE = 60.0
 PREVIEW_RATE = 10.0
+MIN_FRAME_RATE_LIMIT = 1.0
+DEFAULT_FRAME_RATE_LIMITS = {
+    MODE_RGB332: 47.0,
+    MODE_RGB565: 25.5,
+}
 
 
 def capture_rate_for_frame_limit(
@@ -59,6 +65,37 @@ def capture_rate_for_frame_limit(
     if source_frame_rate is not None:
         rate = min(rate, max(1.0, float(source_frame_rate)))
     return rate
+
+
+def normalize_mode(mode: int | str) -> int:
+    if isinstance(mode, str):
+        try:
+            return MODE_CODES[mode.lower()]
+        except KeyError as exc:
+            raise ValueError(f"unsupported color mode: {mode}") from exc
+    if mode not in MODE_NAMES:
+        raise ValueError(f"unsupported color mode: {mode}")
+    return mode
+
+
+def default_frame_rate_limit(mode: int | str) -> float:
+    """Return the validated hardware working point for one color mode."""
+    return DEFAULT_FRAME_RATE_LIMITS[normalize_mode(mode)]
+
+
+def validate_frame_rate_limit(value: object, mode: int | str) -> float:
+    """Parse a user frame cap and enforce the mode-specific safe range."""
+    mode = normalize_mode(mode)
+    try:
+        frame_rate = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("frame rate must be a number") from exc
+    maximum = DEFAULT_FRAME_RATE_LIMITS[mode]
+    if not math.isfinite(frame_rate) or not MIN_FRAME_RATE_LIMIT <= frame_rate <= maximum:
+        raise ValueError(
+            f"frame rate must be between {MIN_FRAME_RATE_LIMIT:g} and {maximum:g} FPS"
+        )
+    return frame_rate
 
 
 def migrate_v2_config(document: object, defaults: dict) -> dict:
@@ -73,28 +110,25 @@ def migrate_v2_config(document: object, defaults: dict) -> dict:
         port = int(defaults["server_port"])
     if not 0 < port < 65536:
         port = int(defaults["server_port"])
+    default_rate = default_frame_rate_limit(color_mode)
+    try:
+        target_fps = validate_frame_rate_limit(
+            source.get("target_fps", default_rate), color_mode
+        )
+    except ValueError:
+        target_fps = default_rate
     migrated = {
         "server_ip": str(source.get("server_ip") or defaults["server_ip"]),
         "server_port": port,
         "resolution": [240, 240],
         "color_mode": color_mode,
+        "target_fps": target_fps,
         "transport_version": 2,
     }
     for key in ("preset", "preset_type", "personal_presets"):
         if key in source:
             migrated[key] = source[key]
     return migrated
-
-
-def normalize_mode(mode: int | str) -> int:
-    if isinstance(mode, str):
-        try:
-            return MODE_CODES[mode.lower()]
-        except KeyError as exc:
-            raise ValueError(f"unsupported color mode: {mode}") from exc
-    if mode not in MODE_NAMES:
-        raise ValueError(f"unsupported color mode: {mode}")
-    return mode
 
 
 def encode_frame_bgr(frame: np.ndarray, mode: int | str) -> bytes:
@@ -323,10 +357,21 @@ class SenderSnapshot:
 
 
 class V2Sender:
-    def __init__(self, host: str, port: int, mode: int | str) -> None:
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        mode: int | str,
+        frame_rate_limit: Optional[float] = None,
+    ) -> None:
         self.host = host
         self.port = int(port)
         self.mode = normalize_mode(mode)
+        self.frame_rate_limit = (
+            default_frame_rate_limit(self.mode)
+            if frame_rate_limit is None
+            else validate_frame_rate_limit(frame_rate_limit, self.mode)
+        )
         self.session_id = secrets.randbits(32) or 1
         self.frame_id = 0
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -343,7 +388,6 @@ class V2Sender:
             minimum_mbps=packet_rate,
             maximum_mbps=packet_rate,
         )
-        self.frame_rate_limit = 47.0 if self.mode == MODE_RGB332 else 25.5
         self._intra_burst_gap_ns = 400_000 if self.mode == MODE_RGB565 else 0
         self._frame_period_ns = int(1_000_000_000 / self.frame_rate_limit)
         self._next_frame_ns = time.perf_counter_ns()
