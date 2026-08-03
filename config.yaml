@@ -4,26 +4,7 @@ resolution:
 - 240
 - 240
 color_mode: rgb332
-lines_per_packet: 6
-udp_interval: 0.00065
-preset_type: personal
-preset: 高清-低彩-高发包
-personal_presets:
-  高清高彩-高发包:
-    server_ip: 192.168.100.161
-    server_port: 8888
-    resolution:
-    - 240
-    - 240
-    color_mode: rgb565
-    lines_per_packet: 3
-    udp_interval: 0.0004
-  高清-低彩-高发包:
-    server_ip: 192.168.100.161
-    server_port: 8888
-    resolution:
-    - 240
-    - 240
-    color_mode: rgb332
-    lines_per_packet: 6
-    udp_interval: 0.00065
+transport_version: 2
+preset_type: builtin
+preset: 240 高帧率 RGB332
+personal_presets: {}

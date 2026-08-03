@@ -894,7 +894,7 @@ streamer:
                 speed: 1.0
                 size: 3.2
                 drift: 0.65
-      active_preset: 多刺星芒脉冲-底部波形-粒子
+      active_preset: 偏上波形-多大粒子
   - type: video_file
     id: video_player
     enable: true

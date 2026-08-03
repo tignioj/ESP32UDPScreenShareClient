@@ -13,10 +13,15 @@ import tkinter.font as tkfont
 
 # 尝试导入UDP发送相关的模块
 try:
-    from esp32_udp_header import ESP32UDPHeader
     import cv2
     import numpy as np
-    import socket
+    from udp_v2 import (
+        MODE_RGB332,
+        MODE_RGB565,
+        V2Sender,
+        migrate_v2_config,
+        stream_latest_frames,
+    )
     from capture.config import (
         delete_audio_preset,
         get_streamer,
@@ -54,11 +59,6 @@ class YAMLConfigEditor:
         self.streaming = False
         self.stream_thread = None
         self.stream_stop_event = None
-        self.sock = None
-        # Keep frame IDs monotonic across UI stop/start cycles. Starting from a
-        # process-specific value also reduces collisions after an app restart.
-        self.frame_id = time.time_ns() & 0xFFFF
-        self.frame_id_lock = threading.Lock()
         # 推流预览只展示已经完整发送的量化帧。发送线程负责发布最新帧，
         # Tk 主线程定时取走并渲染，避免跨线程操作界面控件。
         self.stream_preview_lock = threading.Lock()
@@ -73,73 +73,42 @@ class YAMLConfigEditor:
         # 默认配置文件
         self.config_file = "config.yaml"
 
-        # 预设配置 - 根据Header常量修正颜色模式值
+        # UDP v2 only supports native 240x240 frames with feedback gating.
         self.presets = {
-            "预设1：240 高清色彩": {
-                'resolution': 240,  # ESP32UDPHeader.RES_240 = 0
-                'color_mode': 0,  # ESP32UDPHeader.COLOR_RGB565 = 0
-                'lines_per_packet': 3,
-                'udp_interval': 0.00075
+            "240 高帧率 RGB332": {
+                'resolution': 240,
+                'color_mode': MODE_RGB332,
             },
-            "预设2：240 节省带宽": {
-                'resolution': 240,  # ESP32UDPHeader.RES_240 = 0
-                'color_mode': 1,  # ESP32UDPHeader.COLOR_RGB332 = 1
-                'lines_per_packet': 6,
-                'udp_interval': 0.001
-            },
-            "预设3：180 高清色彩": {
-                'resolution': 180,  # ESP32UDPHeader.RES_180 = 1
-                'color_mode': 0,  # ESP32UDPHeader.COLOR_RGB565 = 0
-                'lines_per_packet': 4,
-                'udp_interval': 0.001
-            },
-            "预设4：180 节省带宽": {
-                'resolution': 180,  # ESP32UDPHeader.RES_180 = 1
-                'color_mode': 1,  # ESP32UDPHeader.COLOR_RGB332 = 1
-                'lines_per_packet': 6,
-                'udp_interval': 0.001
-            },
-            "预设5：120 高清色彩": {
-                'resolution': 120,  # ESP32UDPHeader.RES_120 = 2
-                'color_mode': 0,  # ESP32UDPHeader.COLOR_RGB565 = 0
-                'lines_per_packet': 4,
-                'udp_interval': 0.001
-            },
-            "预设6：120 节省带宽": {
-                'resolution': 120,  # ESP32UDPHeader.RES_120 = 2
-                'color_mode': 1,  # ESP32UDPHeader.COLOR_RGB332 = 1
-                'lines_per_packet': 4,
-                'udp_interval': 0.001
+            "240 高画质 RGB565": {
+                'resolution': 240,
+                'color_mode': MODE_RGB565,
             }
         }
-        self.default_preset_name = "预设5：120 高清色彩"
+        self.default_preset_name = "240 高帧率 RGB332"
         self.custom_preset_label = "自定义配置"
         self.builtin_preset_prefix = "内置 · "
         self.personal_preset_prefix = "个人 · "
         self.personal_presets = {}
 
-        # 首次启动没有 config.yaml 时使用预设5的发送参数。
+        # 首次启动没有 config.yaml 时使用高帧率 RGB332。
         default_preset = self.presets[self.default_preset_name]
         self.default_config = {
             'server_ip': "192.168.100.161",
             'server_port': 8888,
             'resolution': [default_preset['resolution'], default_preset['resolution']],
-            'color_mode': "rgb565" if default_preset['color_mode'] == 0 else "rgb332",
-            'lines_per_packet': default_preset['lines_per_packet'],
-            'udp_interval': default_preset['udp_interval'],
+            'color_mode': "rgb565" if default_preset['color_mode'] == MODE_RGB565 else "rgb332",
+            'transport_version': 2,
             'preset': self.default_preset_name,
         }
 
         # 可选值定义（存储为字符串列表，用于显示）
-        self.valid_resolution_strings = ["[240,240]", "[180,180]", "[120,120]"]
-        self.valid_resolution_values = [[240, 240], [180, 180], [120, 120]]
+        self.valid_resolution_strings = ["[240,240]"]
+        self.valid_resolution_values = [[240, 240]]
 
-        # 根据Header限制lines_per_packet范围（0-8）
+        # UDP v2 固定 240x240，仅色彩模式可选。
         self.valid_values = {
             'resolution': self.valid_resolution_strings,  # 用于下拉框
             'color_mode': ['rgb332', 'rgb565'],
-            'lines_per_packet': {'min': 1, 'max': 8},  # Header限制：0-15
-            'udp_interval': {'min': 0.0001, 'max': 0.1}
         }
 
         # 预设变量
@@ -350,28 +319,14 @@ class YAMLConfigEditor:
         )
         self.entries['color_mode'].grid(row=0, column=3, sticky=(tk.W, tk.E), padx=(8, 0), pady=3)
 
-        ttk.Label(transport_frame, text="每包行数:").grid(row=1, column=0, sticky=tk.W, pady=3)
-        self.entries['lines_per_packet'] = ttk.Spinbox(
-            transport_frame,
-            from_=1,
-            to=8,
-            width=13,
-            command=self.on_udp_parameter_edited,
-        )
-        self.entries['lines_per_packet'].grid(row=1, column=1, sticky=(tk.W, tk.E), padx=(8, 20), pady=3)
-        ttk.Label(transport_frame, text="发包间隔 (秒):").grid(row=1, column=2, sticky=tk.W, pady=3)
-        self.entries['udp_interval'] = ttk.Entry(transport_frame, width=13)
-        self.entries['udp_interval'].grid(row=1, column=3, sticky=(tk.W, tk.E), padx=(8, 0), pady=3)
         ttk.Label(
             transport_frame,
-            text="高级参数会随预设自动填写；手动修改后将显示为“自定义配置”。",
+            text="UDP v2 固定使用 MTU 满载图像块，并根据 ESP32 实时反馈自动调速。",
             foreground="#777777",
-        ).grid(row=2, column=0, columnspan=4, sticky=tk.W, pady=(6, 0))
+        ).grid(row=1, column=0, columnspan=4, sticky=tk.W, pady=(6, 0))
 
         for key in ('resolution', 'color_mode'):
             self.entries[key].bind("<<ComboboxSelected>>", self.on_udp_parameter_edited)
-        for key in ('lines_per_packet', 'udp_interval'):
-            self.entries[key].bind("<KeyRelease>", self.on_udp_parameter_edited)
         for key in ('server_ip', 'server_port'):
             self.entries[key].bind("<KeyRelease>", self.on_udp_parameter_edited)
 
@@ -1748,24 +1703,19 @@ class YAMLConfigEditor:
             if not isinstance(raw_config, dict):
                 continue
             try:
-                resolution = raw_config['resolution']
                 config = {
                     'server_ip': str(raw_config['server_ip']),
                     'server_port': int(raw_config['server_port']),
-                    'resolution': [int(resolution[0]), int(resolution[1])],
+                    'resolution': [240, 240],
                     'color_mode': str(raw_config['color_mode']),
-                    'lines_per_packet': int(raw_config['lines_per_packet']),
-                    'udp_interval': float(raw_config['udp_interval']),
+                    'transport_version': 2,
                 }
-            except (KeyError, TypeError, ValueError, IndexError):
+            except (KeyError, TypeError, ValueError):
                 continue
             if (
                 config['server_ip']
                 and 0 < config['server_port'] < 65536
-                and config['resolution'] in self.valid_resolution_values
                 and config['color_mode'] in self.valid_values['color_mode']
-                and 1 <= config['lines_per_packet'] <= 8
-                and 0.0001 <= config['udp_interval'] <= 0.1
             ):
                 normalized[name] = config
         return normalized
@@ -1776,10 +1726,7 @@ class YAMLConfigEditor:
             return (
                 first.get('server_ip') == second.get('server_ip')
                 and int(first.get('server_port')) == int(second.get('server_port'))
-                and list(first.get('resolution')) == list(second.get('resolution'))
                 and first.get('color_mode') == second.get('color_mode')
-                and int(first.get('lines_per_packet')) == int(second.get('lines_per_packet'))
-                and abs(float(first.get('udp_interval')) - float(second.get('udp_interval'))) < 1e-12
             )
         except (TypeError, ValueError):
             return False
@@ -1798,43 +1745,27 @@ class YAMLConfigEditor:
         preset_type, preset_name = self.parse_udp_preset_label(preset_label or "")
         if preset_type == "personal":
             preset = self.personal_presets[preset_name]
-            color = "RGB565 高清色彩" if preset['color_mode'] == "rgb565" else "RGB332 节省带宽"
-            interval_ms = preset['udp_interval'] * 1000
+            color = "RGB565 高画质" if preset['color_mode'] == "rgb565" else "RGB332 高帧率"
             self.preset_summary_var.set(
                 f"个人 · {preset['server_ip']}:{preset['server_port']} · "
-                f"{preset['resolution'][0]} × {preset['resolution'][1]} · {color} · "
-                f"每包 {preset['lines_per_packet']} 行 · {interval_ms:g} ms"
+                f"240 × 240 · {color} · V2 反馈闭环"
             )
             return
         if preset_type != "builtin":
             self.preset_summary_var.set("当前参数尚未保存为预设")
             return
         preset = self.presets[preset_name]
-        color = "RGB565 高清色彩" if preset['color_mode'] == 0 else "RGB332 节省带宽"
-        interval_ms = preset['udp_interval'] * 1000
+        color = "RGB565 高画质" if preset['color_mode'] == MODE_RGB565 else "RGB332 高帧率"
         self.preset_summary_var.set(
-            f"内置只读 · {preset['resolution']} × {preset['resolution']} · {color} · "
-            f"每包 {preset['lines_per_packet']} 行 · {interval_ms:g} ms"
+            f"内置只读 · 240 × 240 · {color} · V2 反馈闭环"
         )
 
     def get_matching_preset(self, config):
         """返回与发送参数完全匹配的内置预设。"""
-        resolution = config.get('resolution')
-        if not isinstance(resolution, (list, tuple)) or len(resolution) != 2:
-            return None
-        try:
-            lines = int(config.get('lines_per_packet'))
-            interval = float(config.get('udp_interval'))
-        except (TypeError, ValueError):
-            return None
-
         for name, preset in self.presets.items():
-            color = "rgb565" if preset['color_mode'] == 0 else "rgb332"
+            color = "rgb565" if preset['color_mode'] == MODE_RGB565 else "rgb332"
             if (
-                list(resolution) == [preset['resolution'], preset['resolution']]
-                and config.get('color_mode') == color
-                and lines == preset['lines_per_packet']
-                and abs(interval - preset['udp_interval']) < 1e-12
+                config.get('color_mode') == color
             ):
                 return name
         return None
@@ -1844,10 +1775,9 @@ class YAMLConfigEditor:
         return {
             'server_ip': self.entries['server_ip'].get(),
             'server_port': int(self.entries['server_port'].get()),
-            'resolution': self.parse_resolution_string(self.entries['resolution'].get()),
+            'resolution': [240, 240],
             'color_mode': self.entries['color_mode'].get(),
-            'lines_per_packet': int(self.entries['lines_per_packet'].get()),
-            'udp_interval': float(self.entries['udp_interval'].get()),
+            'transport_version': 2,
         }
 
     def on_udp_parameter_edited(self, event=None):
@@ -1904,15 +1834,11 @@ class YAMLConfigEditor:
                 color_mode = preset['color_mode']
             else:
                 resolution = [preset['resolution'], preset['resolution']]
-                color_mode = "rgb565" if preset['color_mode'] == 0 else "rgb332"
+                color_mode = "rgb565" if preset['color_mode'] == MODE_RGB565 else "rgb332"
 
             self.entries['resolution'].set(f"[{resolution[0]},{resolution[1]}]")
             self.entries['color_mode'].set(color_mode)
 
-            self.entries['lines_per_packet'].delete(0, tk.END)
-            self.entries['lines_per_packet'].insert(0, str(preset['lines_per_packet']))
-            self.entries['udp_interval'].delete(0, tk.END)
-            self.entries['udp_interval'].insert(0, str(preset['udp_interval']))
             self.preset_var.set(preset_label)
             self.update_preset_summary(preset_label)
         finally:
@@ -1940,10 +1866,11 @@ class YAMLConfigEditor:
                     raise ValueError("配置内容必须是 YAML 对象")
             else:
                 config = self.default_config.copy()
+            config = migrate_v2_config(config, self.default_config)
             self.personal_presets = self.normalize_personal_udp_presets(config.get('personal_presets'))
             self.refresh_udp_preset_list()
             if using_default_config:
-                self.log_message("未找到有效的 UDP 配置，已选择预设5：120 高清色彩")
+                self.log_message("未找到有效的 UDP 配置，已选择 240 高帧率 RGB332")
 
             # 填充表单
             self.updating_udp_controls = True
@@ -1953,17 +1880,8 @@ class YAMLConfigEditor:
                 self.entries['server_port'].delete(0, tk.END)
                 self.entries['server_port'].insert(0, str(config.get('server_port', self.default_config['server_port'])))
 
-                resolution = config.get('resolution', self.default_config['resolution'])
-                self.entries['resolution'].set(f"[{resolution[0]},{resolution[1]}]")
+                self.entries['resolution'].set("[240,240]")
                 self.entries['color_mode'].set(config.get('color_mode', self.default_config['color_mode']))
-                self.entries['lines_per_packet'].delete(0, tk.END)
-                self.entries['lines_per_packet'].insert(
-                    0, str(config.get('lines_per_packet', self.default_config['lines_per_packet']))
-                )
-                self.entries['udp_interval'].delete(0, tk.END)
-                self.entries['udp_interval'].insert(
-                    0, str(config.get('udp_interval', self.default_config['udp_interval']))
-                )
             finally:
                 self.updating_udp_controls = False
 
@@ -2027,42 +1945,11 @@ class YAMLConfigEditor:
         res_text = self.entries['resolution'].get()
         if res_text not in self.valid_resolution_strings:
             errors.append("请选择有效的分辨率")
-        else:
-            # 检查是否为正方形分辨率
-            match = re.match(r'\[(\d+),(\d+)\]', res_text)
-            if match:
-                width = int(match.group(1))
-                height = int(match.group(2))
-                if width != height:
-                    errors.append("分辨率必须是正方形")
 
         # 验证color_mode
         color = self.entries['color_mode'].get()
         if color not in self.valid_values['color_mode']:
             errors.append("请选择有效的色彩模式")
-
-        # 验证lines_per_packet - 修正范围为1-8
-        try:
-            lines = int(self.entries['lines_per_packet'].get())
-            if not (1 <= lines <= 8):
-                errors.append("每包行数必须在1-8之间")
-            elif res_text in self.valid_resolution_strings and color in self.valid_values['color_mode']:
-                width = self.parse_resolution_string(res_text)[0]
-                color_mode = self.get_color_mode_code(color)
-                try:
-                    ESP32UDPHeader.validate_stream_config(width, color_mode, lines)
-                except ValueError as exc:
-                    errors.append(str(exc))
-        except ValueError:
-            errors.append("每包行数必须是整数")
-
-        # 验证udp_interval
-        try:
-            interval = float(self.entries['udp_interval'].get())
-            if not (0.0001 <= interval <= 0.1):
-                errors.append("UDP发送间隔必须在0.0001到0.1之间")
-        except ValueError:
-            errors.append("UDP发送间隔必须是数字")
 
         return errors
 
@@ -2073,27 +1960,14 @@ class YAMLConfigEditor:
             return [int(match.group(1)), int(match.group(2))]
         return [240, 240]  # 默认值
 
-    def get_resolution_code(self, width):
-        """根据宽度获取分辨率代码"""
-        if width == 240:
-            return ESP32UDPHeader.RES_240  # 0
-        elif width == 180:
-            return ESP32UDPHeader.RES_180  # 1
-        elif width == 120:
-            return ESP32UDPHeader.RES_120  # 2
-        else:
-            return ESP32UDPHeader.RES_240  # 默认
-
     def get_color_mode_code(self, color_mode_str):
         """根据字符串获取颜色模式代码"""
-        # 根据Header：COLOR_RGB565=0, COLOR_RGB332=1
         if color_mode_str == "rgb565":
-            return ESP32UDPHeader.COLOR_RGB565  # 0
-        else:
-            return ESP32UDPHeader.COLOR_RGB332  # 1
+            return MODE_RGB565
+        return MODE_RGB332
 
     def build_udp_config_document(self, config=None):
-        """生成兼容旧版字段、并包含全部个人预设的配置文档。"""
+        """生成 UDP v2 配置文档。"""
         current = dict(config or self.get_udp_form_config())
         preset_type, preset_name = self.parse_udp_preset_label(self.preset_var.get())
         if preset_type == 'personal':
@@ -2117,6 +1991,7 @@ class YAMLConfigEditor:
         current['personal_presets'] = {
             name: dict(values) for name, values in self.personal_presets.items()
         }
+        current['transport_version'] = 2
         return current
 
     def write_udp_config(self, config=None):
@@ -2220,15 +2095,8 @@ class YAMLConfigEditor:
         server_ip = self.entries['server_ip'].get()
         server_port = int(self.entries['server_port'].get())
 
-        # 解析分辨率
-        res_text = self.entries['resolution'].get()
-        resolution_list = self.parse_resolution_string(res_text)
-        width = resolution_list[0]
-
-        # 获取其他配置
+        width = 240
         color_mode_str = self.entries['color_mode'].get()
-        lines_per_packet = int(self.entries['lines_per_packet'].get())
-        udp_interval = float(self.entries['udp_interval'].get())
 
         # 开始推流线程
         self.clear_stream_preview("等待第一帧")
@@ -2240,7 +2108,7 @@ class YAMLConfigEditor:
         self.stream_stop_event = stop_event
         self.stream_thread = threading.Thread(
             target=self.stream_udp_data,
-            args=(server_ip, server_port, width, color_mode_str, lines_per_packet, udp_interval, stop_event),
+            args=(server_ip, server_port, color_mode_str, stop_event),
             daemon=True
         )
         self.stream_thread.start()
@@ -2261,25 +2129,6 @@ class YAMLConfigEditor:
 
         self.log_message("停止推流")
         self.status_var.set("推流已停止")
-
-    def bgr_to_rgb332_cv2_style(self, bgr_image):
-        """类似OpenCV风格的RGB332转换"""
-        b, g, r = cv2.split(bgr_image)
-        r_332 = (r >> 5) & 0x07
-        g_332 = (g >> 5) & 0x07
-        b_332 = (b >> 6) & 0x03
-        return (r_332 << 5) | (g_332 << 2) | b_332
-
-    def make_stream_preview_frame(self, converted_frame, color_mode_code):
-        """把线上色彩数据还原为 BGR，预览发送后的实际色彩效果。"""
-        if color_mode_code == ESP32UDPHeader.COLOR_RGB565:
-            return cv2.cvtColor(converted_frame, cv2.COLOR_BGR5652BGR)
-
-        packed = converted_frame.astype(np.uint8, copy=False)
-        red = (((packed >> 5) & 0x07).astype(np.uint16) * 255 // 7).astype(np.uint8)
-        green = (((packed >> 2) & 0x07).astype(np.uint16) * 255 // 7).astype(np.uint8)
-        blue = ((packed & 0x03).astype(np.uint16) * 255 // 3).astype(np.uint8)
-        return cv2.merge((blue, green, red))
 
     def publish_stream_preview(self, frame, color_mode_str):
         """由发送线程发布一张已经完整发送的预览帧。"""
@@ -2343,132 +2192,43 @@ class YAMLConfigEditor:
             except tk.TclError:
                 self.stream_preview_job = None
 
-    def stream_udp_data(self, server_ip, server_port, width, color_mode_str, lines_per_packet, udp_interval, stop_event):
-        """UDP推流线程函数"""
+    def stream_udp_data(self, server_ip, server_port, color_mode_str, stop_event):
+        """Run the UDP v2 capture, encoder, pacer, and feedback loop."""
         try:
-            # 初始化UDP socket
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            self.sock = sock
+            mode = self.get_color_mode_code(color_mode_str)
 
-            # 初始化屏幕捕获
-            # cap = ScreenCaptureCV()
+            def publish_preview(frame):
+                self.publish_stream_preview(frame, color_mode_str)
 
-            # 设置分辨率
-            height = width
+            def publish_stats(snapshot):
+                latency = (
+                    "--" if snapshot.latency_p95_ms is None
+                    else f"{snapshot.latency_p95_ms:.0f} ms"
+                )
+                self.log_message(
+                    f"V2统计: 发送 {snapshot.sent_fps:.1f} FPS / "
+                    f"完整显示 {snapshot.displayed_fps:.1f} FPS, "
+                    f"{snapshot.udp_mbps:.2f} Mbit/s, "
+                    f"有效率 {snapshot.display_efficiency * 100:.1f}%, "
+                    f"队列 {snapshot.queue_depth}/{snapshot.queue_capacity or '--'}, "
+                    f"P95 {latency}, 堆 {snapshot.free_heap} B"
+                )
 
-            # 获取分辨率代码
-            resolution_code = self.get_resolution_code(width)
-
-            # 获取颜色模式代码
-            color_mode_code = self.get_color_mode_code(color_mode_str)
-
-            # MTU and the ESP32 post-scale line buffer both constrain packet height.
-            ESP32UDPHeader.validate_stream_config(width, color_mode_code, lines_per_packet)
-
-            self.log_message(f"开始推流: 分辨率={width}x{height}, 颜色模式={color_mode_str}")
-            self.log_message(
-                f"Header参数: 分辨率代码={resolution_code}, 颜色代码={color_mode_code}, 每包行数={lines_per_packet}")
-
-            last_frame_time = time.perf_counter()
-            stats_started = time.perf_counter()
-            stats_frames = 0
-            stats_packets = 0
-            stats_bytes = 0
-            while not stop_event.is_set():
-                try:
-                    # 捕获屏幕
-                    # sc = cap.capture_window_by_title("原神", mss_mode=False)
-                    sc = streamer.get_frame()  # 调用这个接口,不关心流来自于哪里，只需要返回一张任意大小的图片
-                    # Do not retransmit the same source frame under a new frame_id.
-                    if sc is None:
-                        if time.perf_counter() - last_frame_time > 5:
-                            time.sleep(0.1)  # 超过5秒没数据，休息
-                        else:
-                            time.sleep(0.001)
-                        continue
-
-                    last_frame_time = time.perf_counter()
-
-                    # 调整大小
-                    if sc.shape[0] != height or sc.shape[1] != width:
-                        sc = cv2.resize(sc, (width, height))
-
-                    # 转换颜色模式
-                    if color_mode_code == ESP32UDPHeader.COLOR_RGB332:  # 1
-                        # RGB332转换
-                        rgb = self.bgr_to_rgb332_cv2_style(sc)
-                    else:  # ESP32UDPHeader.COLOR_RGB565 = 0
-                        # RGB565转换
-                        rgb = cv2.cvtColor(sc, cv2.COLOR_BGR2BGR565)
-
-                    with self.frame_id_lock:
-                        self.frame_id = (self.frame_id + 1) & 0xFFFF
-                        frame_id = self.frame_id
-                    frame_blob = np.ascontiguousarray(rgb).tobytes()
-                    row_bytes = width * (2 if color_mode_code == ESP32UDPHeader.COLOR_RGB565 else 1)
-                    next_packet_at = time.perf_counter()
-
-                    # 发送数据
-                    for y in range(0, height, lines_per_packet):
-                        remaining = next_packet_at - time.perf_counter()
-                        if remaining > 0:
-                            time.sleep(remaining)
-
-                        lines = min(lines_per_packet, height - y)
-
-                        # The converted frame is contiguous, so packetization only slices bytes.
-                        offset = y * row_bytes
-                        payload = frame_blob[offset:offset + lines * row_bytes]
-
-                        # 创建Header
-                        header = ESP32UDPHeader.make_header(
-                            frame_id=frame_id,
-                            y_start=y,
-                            resolution=resolution_code,
-                            color_mode=color_mode_code,
-                            line_count=lines
-                        )
-
-                        # 发送数据包
-                        datagram = header + payload
-                        sock.sendto(datagram, (server_ip, server_port))
-                        stats_packets += 1
-                        stats_bytes += len(datagram)
-                        next_packet_at += udp_interval
-
-                        # 检查是否应该停止
-                        if stop_event.is_set():
-                            break
-
-                    # 只有整帧的所有数据包均发送完成，才进入“当前推送画面”。
-                    if stop_event.is_set():
-                        break
-                    preview_frame = self.make_stream_preview_frame(rgb, color_mode_code)
-                    self.publish_stream_preview(preview_frame, color_mode_str)
-
-                    stats_frames += 1
-                    now = time.perf_counter()
-                    elapsed = now - stats_started
-                    if elapsed >= 2.0:
-                        self.log_message(
-                            f"发送统计: {stats_frames / elapsed:.1f} FPS, "
-                            f"{stats_packets / elapsed:.0f} 包/秒, "
-                            f"{stats_bytes * 8 / elapsed / 1_000_000:.2f} Mbit/s"
-                        )
-                        stats_started = now
-                        stats_frames = stats_packets = stats_bytes = 0
-
-                except Exception as e:
-                    self.log_message(f"推流错误: {str(e)}")
-                    time.sleep(1)  # 出错后等待1秒
-
-            # 关闭socket
-            sock.close()
-            self.sock = None
-
+            with V2Sender(server_ip, server_port, mode) as sender:
+                self.log_message(
+                    f"UDP v2 会话 {sender.session_id:08x}: 240x240 {color_mode_str.upper()}, "
+                    f"包内节拍 {sender.pacer.rate_mbps:.1f} Mbit/s, "
+                    f"帧率上限 {sender.frame_rate_limit:.1f} FPS"
+                )
+                stream_latest_frames(
+                    streamer.get_frame,
+                    sender,
+                    stop_event,
+                    preview_callback=publish_preview,
+                    stats_callback=publish_stats,
+                )
         except Exception as e:
-            self.log_message(f"推流线程错误: {str(e)}")
-            # 工作线程不能直接调用 Tk，也不能从这里调用 root.after。
+            self.log_message(f"V2 推流线程错误: {str(e)}")
             self.ui_action_queue.put(self.handle_streaming_failure)
 
     def on_closing(self):
