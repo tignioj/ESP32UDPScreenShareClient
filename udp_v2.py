@@ -45,6 +45,21 @@ FRAME_PAYLOAD_SIZE = {
     MODE_RGB565: WIDTH * HEIGHT * 2,
 }
 
+CAPTURE_RATE_HEADROOM = 1.15
+MAX_CAPTURE_RATE = 60.0
+PREVIEW_RATE = 10.0
+
+
+def capture_rate_for_frame_limit(
+    frame_rate_limit: float,
+    source_frame_rate: Optional[float] = None,
+) -> float:
+    """Respect the source rate while bounding encoder work above the wire rate."""
+    rate = min(MAX_CAPTURE_RATE, frame_rate_limit * CAPTURE_RATE_HEADROOM)
+    if source_frame_rate is not None:
+        rate = min(rate, max(1.0, float(source_frame_rate)))
+    return rate
+
 
 def migrate_v2_config(document: object, defaults: dict) -> dict:
     """Migrate v1/user YAML data to the small UDP v2 configuration surface."""
@@ -504,8 +519,9 @@ def stream_latest_frames(
     stop_event: threading.Event,
     preview_callback: Optional[Callable[[np.ndarray], None]] = None,
     stats_callback: Optional[Callable[[SenderSnapshot], None]] = None,
+    frame_rate_provider: Optional[Callable[[], float]] = None,
 ) -> None:
-    """Capture/encode on a producer while the caller sends only the latest frame."""
+    """Capture at the source rate while continuously sending its latest frame."""
     condition = threading.Condition()
     latest: dict[str, object] = {"version": 0, "payload": None, "error": None}
 
@@ -522,10 +538,17 @@ def stream_latest_frames(
                     latest["version"] = int(latest["version"]) + 1
                     latest["payload"] = payload
                     condition.notify()
-                next_capture += 1.0 / 120.0
+                source_rate = (
+                    frame_rate_provider() if frame_rate_provider is not None else None
+                )
+                capture_rate = capture_rate_for_frame_limit(
+                    sender.frame_rate_limit, source_rate
+                )
+                capture_period = 1.0 / capture_rate
+                next_capture += capture_period
                 remaining = next_capture - time.perf_counter()
                 if remaining > 0:
-                    time.sleep(remaining)
+                    stop_event.wait(remaining)
                 elif remaining < -0.1:
                     next_capture = time.perf_counter()
         except BaseException as exc:
@@ -535,30 +558,38 @@ def stream_latest_frames(
 
     producer = threading.Thread(target=produce, name="udp-v2-capture", daemon=True)
     producer.start()
-    consumed_version = 0
+    previewed_version = -1
     next_stats = time.perf_counter() + 2.0
+    next_preview = time.perf_counter()
     try:
         while not stop_event.is_set():
             with condition:
                 condition.wait_for(
                     lambda: stop_event.is_set()
                     or latest["error"] is not None
-                    or int(latest["version"]) != consumed_version,
+                    or latest["payload"] is not None,
                     timeout=0.1,
                 )
                 if latest["error"] is not None:
                     raise latest["error"]  # type: ignore[misc]
                 if stop_event.is_set() or latest["payload"] is None:
                     continue
-                consumed_version = int(latest["version"])
+                current_version = int(latest["version"])
                 payload = latest["payload"]
             if not sender.send_payload(payload, stop_event):  # type: ignore[arg-type]
                 break
-            if preview_callback is not None:
+            now = time.perf_counter()
+            if (
+                preview_callback is not None
+                and now >= next_preview
+                and current_version != previewed_version
+            ):
                 preview_callback(decode_frame_for_preview(payload, sender.mode))  # type: ignore[arg-type]
-            if stats_callback is not None and time.perf_counter() >= next_stats:
+                previewed_version = current_version
+                next_preview = now + 1.0 / PREVIEW_RATE
+            if stats_callback is not None and now >= next_stats:
                 stats_callback(sender.snapshot())
-                next_stats = time.perf_counter() + 2.0
+                next_stats = now + 2.0
     finally:
         stop_event.set()
         with condition:

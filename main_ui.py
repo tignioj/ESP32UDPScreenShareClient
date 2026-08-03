@@ -2226,6 +2226,7 @@ class YAMLConfigEditor:
                     stop_event,
                     preview_callback=publish_preview,
                     stats_callback=publish_stats,
+                    frame_rate_provider=streamer.get_frame_rate,
                 )
         except Exception as e:
             self.log_message(f"V2 推流线程错误: {str(e)}")

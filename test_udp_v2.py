@@ -1,4 +1,5 @@
 import struct
+import threading
 import unittest
 
 import numpy as np
@@ -14,11 +15,13 @@ from udp_v2 import (
     MODE_RGB332,
     MODE_RGB565,
     PAYLOAD_SIZE,
+    capture_rate_for_frame_limit,
     encode_frame_bgr,
     make_data_packet,
     migrate_v2_config,
     packetize_frame,
     parse_feedback,
+    stream_latest_frames,
     _u32_at_or_before,
     _u32_delta,
 )
@@ -88,6 +91,40 @@ class ProtocolV2Tests(unittest.TestCase):
             7, 0x1_0000_0000, MODE_RGB332, 0, bytes(PAYLOAD_SIZE)
         )
         self.assertEqual(0, DATA_HEADER.unpack_from(wrapped)[2])
+
+    def test_capture_rate_tracks_wire_rate_with_bounded_headroom(self):
+        self.assertAlmostEqual(54.05, capture_rate_for_frame_limit(47.0))
+        self.assertAlmostEqual(29.325, capture_rate_for_frame_limit(25.5))
+        self.assertEqual(30.0, capture_rate_for_frame_limit(47.0, 30.0))
+        self.assertEqual(60.0, capture_rate_for_frame_limit(120.0))
+
+    def test_sender_reuses_latest_payload_when_source_rate_is_lower(self):
+        stop_event = threading.Event()
+        frame = np.zeros((240, 240, 3), dtype=np.uint8)
+        provider_calls = 0
+
+        def provider():
+            nonlocal provider_calls
+            provider_calls += 1
+            return frame if provider_calls == 1 else None
+
+        class FakeSender:
+            mode = MODE_RGB332
+            frame_rate_limit = 47.0
+
+            def __init__(self):
+                self.payloads = []
+
+            def send_payload(self, payload, event):
+                self.payloads.append(payload)
+                if len(self.payloads) == 3:
+                    event.set()
+                return True
+
+        sender = FakeSender()
+        stream_latest_frames(provider, sender, stop_event)
+        self.assertEqual(3, len(sender.payloads))
+        self.assertTrue(all(payload == sender.payloads[0] for payload in sender.payloads))
 
 
 class PacerTests(unittest.TestCase):

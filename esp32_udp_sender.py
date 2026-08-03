@@ -21,7 +21,12 @@ def main() -> None:
     signal.signal(signal.SIGINT, lambda *_: stop_event.set())
     streamer = get_streamer()
     with V2Sender(args.ip, args.port, args.mode) as sender:
-        stream_latest_frames(streamer.get_frame, sender, stop_event)
+        stream_latest_frames(
+            streamer.get_frame,
+            sender,
+            stop_event,
+            frame_rate_provider=streamer.get_frame_rate,
+        )
 
 
 if __name__ == "__main__":

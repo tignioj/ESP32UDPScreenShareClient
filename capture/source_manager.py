@@ -155,6 +155,12 @@ class SourceManager:
             source = self.get_source(source_id)
             return source.get_info() if source else {}
 
+    def get_source_frame_rate(self, source_id: str = None) -> float:
+        """Return the active source's intended render/capture rate."""
+        with self._source_lock:
+            source = self.get_source(source_id)
+            return float(source.fps) if source else 30.0
+
     def get_source_preview(self, source_id: str = None) -> Optional[np.ndarray]:
         """读取图像源缓存的预览帧，不推进播放位置。"""
         with self._source_lock:
