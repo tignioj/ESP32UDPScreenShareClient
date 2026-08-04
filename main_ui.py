@@ -477,6 +477,7 @@ class YAMLConfigEditor:
         video_path_buttons.grid(row=0, column=2, sticky=tk.E)
         ttk.Button(video_path_buttons, text="选择目录", command=self.choose_video_directory).pack(side=tk.LEFT)
         ttk.Button(video_path_buttons, text="选择视频", command=self.choose_video_file).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(video_path_buttons, text="刷新目录", command=self.refresh_video_directory).pack(side=tk.LEFT, padx=(6, 0))
 
         playback_settings = ttk.Frame(self.video_controls_frame)
         playback_settings.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(8, 6))
@@ -1255,6 +1256,21 @@ class YAMLConfigEditor:
             self.video_path_var.set(directory)
             if self.apply_video_settings(include_path=True):
                 self.log_message(f"已加载视频目录: {directory}")
+
+    def refresh_video_directory(self):
+        """重新扫描当前视频目录并更新视频列表。"""
+        source_id = self.get_selected_source_id()
+        if not source_id or self.source_type_by_id.get(source_id) != 'video_file':
+            return
+        try:
+            if not streamer.set_source_config({'refresh_video_files': True}, source_id):
+                raise ValueError("当前目录中没有可播放的 MP4 视频")
+            self.refresh_video_controls()
+            video_count = len(streamer.get_source_info(source_id).get('video_files', ()))
+            self.log_message(f"已刷新视频目录，共发现 {video_count} 个视频")
+        except Exception as e:
+            messagebox.showerror("刷新视频目录失败", str(e))
+            self.log_message(f"刷新视频目录失败: {str(e)}")
 
     def choose_video_file(self):
         initial = self.video_path_var.get().strip()

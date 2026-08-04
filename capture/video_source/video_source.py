@@ -88,6 +88,31 @@ class VideoFileSource(ImageSourceInterface):
         self.auto_play_next = self.play_mode != 'single_loop'
         self.random_play = self.play_mode == 'random'
 
+    def refresh_video_files(self) -> bool:
+        """重新扫描当前目录，并尽量保持当前视频的播放状态。"""
+        if not os.path.isdir(self.video_path):
+            return False
+
+        video_files = sorted(
+            (f for f in os.listdir(self.video_path) if f.lower().endswith('.mp4')),
+            key=str.casefold,
+        )
+        if not video_files:
+            return False
+
+        current_video = (
+            self._video_files[self._current_idx]
+            if self._video_files and self._current_idx < len(self._video_files)
+            else None
+        )
+        self._video_files = video_files
+        if current_video in self._video_files:
+            self._current_idx = self._video_files.index(current_video)
+            return True
+
+        self._current_idx = 0
+        return self._open_current_video()
+
     def _open_current_video(self) -> bool:
         """打开当前视频"""
         if self._cap:
@@ -254,6 +279,9 @@ class VideoFileSource(ImageSourceInterface):
                 preview_enabled=self.preview_enabled,
             )
             if not initialized:
+                return False
+        elif config.get('refresh_video_files'):
+            if not self.refresh_video_files():
                 return False
         requested_video = config.get('current_video', config.get('play_video'))
         if requested_video is not None:

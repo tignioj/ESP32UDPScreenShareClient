@@ -1,3 +1,5 @@
+import shutil
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -41,6 +43,22 @@ class VideoFileSourcePlaybackTests(unittest.TestCase):
         self.assertEqual(current_index, self.source._next_video_index())
         self.assertEqual("single_loop", info["play_mode"])
         self.assertEqual(2.0, info["playback_rate"])
+
+    def test_refresh_video_files_finds_new_files_without_restarting_current_video(self):
+        sample_video = next(self.video_directory.glob("*.mp4"))
+        with tempfile.TemporaryDirectory() as directory:
+            shutil.copy2(sample_video, Path(directory) / "first.mp4")
+            self.assertTrue(self.source.initialize(video_path=directory))
+            current_capture = self.source._cap
+
+            shutil.copy2(sample_video, Path(directory) / "new-video.MP4")
+            self.assertTrue(self.source.set_config({"refresh_video_files": True}))
+
+            info = self.source.get_info()
+            self.assertEqual(["first.mp4", "new-video.MP4"], info["video_files"])
+            self.assertEqual("first.mp4", info["current_video"])
+            self.assertIs(current_capture, self.source._cap)
+            self.source.release()
 
 
 if __name__ == "__main__":
