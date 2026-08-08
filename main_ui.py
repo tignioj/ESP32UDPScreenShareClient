@@ -182,6 +182,27 @@ class YAMLConfigEditor:
         self.audio_effect_parameter_value_vars = {}
         self.updating_audio_controls = False
 
+        # 音频可视化可以脱离 UDP 推流，以无边框透明悬浮窗独立运行。
+        # 帧生成留在后台线程，Tk 主线程只负责交换已经编码好的 PNG。
+        self.audio_overlay_fps_var = tk.StringVar(value="30")
+        self.audio_overlay_status_var = tk.StringVar(value="独立窗口未运行")
+        self.audio_overlay_frame_rate = 30.0
+        self.audio_overlay_running = False
+        self.audio_overlay_source_id = None
+        self.audio_overlay_window = None
+        self.audio_overlay_label = None
+        self.audio_overlay_image = None
+        self.audio_overlay_thread = None
+        self.audio_overlay_stop_event = None
+        self.audio_overlay_refresh_job = None
+        self.audio_overlay_lock = threading.Lock()
+        self.audio_overlay_png = None
+        self.audio_overlay_version = 0
+        self.audio_overlay_rendered_version = -1
+        self.audio_overlay_size = 480
+        self.audio_overlay_drag_origin = None
+        self.audio_overlay_error = None
+
         # 日志文本框
         self.log_text = None
         # Tk 控件只能在主线程访问。推流线程把日志放入队列，由主线程刷新。
@@ -664,8 +685,56 @@ class YAMLConfigEditor:
             command=self.save_audio_config,
         ).grid(row=0, column=1, sticky=tk.E)
 
+        standalone_frame = ttk.LabelFrame(
+            self.audio_controls_frame,
+            text="独立透明窗口",
+            padding=(8, 5),
+        )
+        standalone_frame.grid(row=4, column=0, sticky=(tk.W, tk.E), pady=(2, 7))
+        standalone_frame.columnconfigure(5, weight=1)
+        self.audio_overlay_start_button = ttk.Button(
+            standalone_frame,
+            text="启动独立窗口",
+            command=self.start_audio_overlay,
+        )
+        self.audio_overlay_start_button.grid(row=0, column=0, padx=(0, 6))
+        self.audio_overlay_stop_button = ttk.Button(
+            standalone_frame,
+            text="关闭",
+            command=self.stop_audio_overlay,
+            state=tk.DISABLED,
+        )
+        self.audio_overlay_stop_button.grid(row=0, column=1, padx=(0, 14))
+        ttk.Label(standalone_frame, text="窗口 FPS:").grid(row=0, column=2, sticky=tk.W)
+        self.audio_overlay_fps_spinbox = ttk.Spinbox(
+            standalone_frame,
+            from_=MIN_SOURCE_FRAME_RATE,
+            to=MAX_SOURCE_FRAME_RATE,
+            increment=1,
+            textvariable=self.audio_overlay_fps_var,
+            width=8,
+            command=self.apply_audio_overlay_frame_rate,
+        )
+        self.audio_overlay_fps_spinbox.grid(row=0, column=3, padx=(6, 6))
+        self.audio_overlay_fps_spinbox.bind('<Return>', self.apply_audio_overlay_frame_rate)
+        ttk.Button(
+            standalone_frame,
+            text="应用并保存",
+            command=self.apply_audio_overlay_frame_rate,
+        ).grid(row=0, column=4, padx=(0, 10))
+        ttk.Label(
+            standalone_frame,
+            textvariable=self.audio_overlay_status_var,
+            foreground="#356a8a",
+        ).grid(row=0, column=5, sticky=tk.W)
+        ttk.Label(
+            standalone_frame,
+            text="无需开始 UDP 推流；拖动窗口可移动，滚轮缩放，右键或 Esc 关闭。效果预设仍在下方管理。",
+            foreground="#666666",
+        ).grid(row=1, column=0, columnspan=6, sticky=tk.W, pady=(5, 0))
+
         parameter_columns = ttk.Frame(self.audio_controls_frame)
-        parameter_columns.grid(row=4, column=0, sticky=(tk.W, tk.E))
+        parameter_columns.grid(row=5, column=0, sticky=(tk.W, tk.E))
         parameter_columns.columnconfigure(0, weight=1, uniform="audio_settings")
         parameter_columns.columnconfigure(1, weight=1, uniform="audio_settings")
 
@@ -694,7 +763,7 @@ class YAMLConfigEditor:
             text="效果组合预设",
             padding=(8, 5),
         )
-        audio_preset_frame.grid(row=5, column=0, sticky=(tk.W, tk.E), pady=(7, 0))
+        audio_preset_frame.grid(row=6, column=0, sticky=(tk.W, tk.E), pady=(7, 0))
         audio_preset_frame.columnconfigure(1, weight=1)
         ttk.Label(audio_preset_frame, text="预设:").grid(row=0, column=0, sticky=tk.W)
         self.audio_preset_combo = ttk.Combobox(
@@ -942,6 +1011,9 @@ class YAMLConfigEditor:
         try:
             frame_rate = streamer.get_source_frame_rate(source_id)
             self.source_fps_var.set(f"{frame_rate:g}")
+            if self.source_type_by_id.get(source_id) == 'audio_visualization':
+                self.audio_overlay_frame_rate = frame_rate
+                self.audio_overlay_fps_var.set(f"{frame_rate:g}")
             self.set_source_fps_control_enabled(True)
         except Exception as e:
             self.set_source_fps_control_enabled(False)
@@ -967,6 +1039,9 @@ class YAMLConfigEditor:
                 streamer.set_source_frame_rate(previous_rate, source_id)
                 raise
             self.source_fps_var.set(f"{applied_rate:g}")
+            if self.source_type_by_id.get(source_id) == 'audio_visualization':
+                self.audio_overlay_frame_rate = applied_rate
+                self.audio_overlay_fps_var.set(f"{applied_rate:g}")
             self.status_var.set(f"图像源 FPS: {applied_rate:g}")
             self.log_message(
                 f"已更新图像源 {source_id} 的帧率: {applied_rate:g} FPS"
@@ -1400,6 +1475,223 @@ class YAMLConfigEditor:
             messagebox.showerror("错误", f"保存视频参数失败: {str(e)}")
             self.log_message(f"保存视频参数失败: {str(e)}")
 
+    def apply_audio_overlay_frame_rate(self, event=None):
+        """Use the audio source FPS as the independent window's saved cadence."""
+        source_id = self.get_selected_source_id()
+        if not source_id or self.source_type_by_id.get(source_id) != 'audio_visualization':
+            return False
+        try:
+            frame_rate = validate_source_frame_rate(self.audio_overlay_fps_var.get())
+        except ValueError as e:
+            messagebox.showerror("窗口帧率无效", str(e))
+            self.audio_overlay_fps_var.set(f"{self.audio_overlay_frame_rate:g}")
+            return False
+
+        self.source_fps_var.set(f"{frame_rate:g}")
+        if not self.apply_source_frame_rate():
+            return False
+        self.audio_overlay_frame_rate = frame_rate
+        self.audio_overlay_fps_var.set(f"{frame_rate:g}")
+        if self.audio_overlay_running:
+            self.audio_overlay_status_var.set(f"运行中 · {frame_rate:g} FPS")
+        return True
+
+    def _create_audio_overlay_window(self):
+        chroma_key = "#010203"
+        window = tk.Toplevel(self.root)
+        window.withdraw()
+        window.title("音频可视化")
+        window.overrideredirect(True)
+        window.configure(bg=chroma_key)
+        window.attributes('-topmost', True)
+        try:
+            window.attributes('-transparentcolor', chroma_key)
+        except tk.TclError:
+            # -transparentcolor is provided by Windows.  Other Tk builds still
+            # get a borderless, gently translucent standalone window.
+            try:
+                window.attributes('-alpha', 0.92)
+            except tk.TclError:
+                pass
+
+        screen_width = window.winfo_screenwidth()
+        x = max(0, screen_width - self.audio_overlay_size - 40)
+        window.geometry(f"{self.audio_overlay_size}x{self.audio_overlay_size}+{x}+80")
+        label = tk.Label(window, bg=chroma_key, bd=0, highlightthickness=0)
+        label.pack(fill=tk.BOTH, expand=True)
+        for widget in (window, label):
+            widget.bind('<ButtonPress-1>', self.begin_audio_overlay_drag)
+            widget.bind('<B1-Motion>', self.drag_audio_overlay)
+            widget.bind('<MouseWheel>', self.resize_audio_overlay)
+            widget.bind('<Button-3>', lambda event: self.stop_audio_overlay())
+            widget.bind('<Escape>', lambda event: self.stop_audio_overlay())
+        window.protocol("WM_DELETE_WINDOW", self.stop_audio_overlay)
+        self.audio_overlay_window = window
+        self.audio_overlay_label = label
+        window.deiconify()
+        window.focus_force()
+
+    def start_audio_overlay(self):
+        """Start the transparent visualizer without starting UDP streaming."""
+        source_id = self.get_selected_source_id()
+        if not source_id or self.source_type_by_id.get(source_id) != 'audio_visualization':
+            messagebox.showwarning("提示", "请先选择一个音频可视化源")
+            return
+        if self.audio_overlay_running:
+            if self.audio_overlay_window is not None:
+                self.audio_overlay_window.lift()
+            return
+        if self.audio_overlay_thread and self.audio_overlay_thread.is_alive():
+            self.audio_overlay_thread.join(timeout=0.5)
+            if self.audio_overlay_thread.is_alive():
+                messagebox.showwarning("等待关闭", "上一个独立窗口正在关闭，请稍后再试。")
+                return
+        if not self.apply_audio_overlay_frame_rate():
+            return
+
+        self.audio_overlay_running = True
+        self.audio_overlay_source_id = source_id
+        self.audio_overlay_error = None
+        with self.audio_overlay_lock:
+            self.audio_overlay_png = None
+            self.audio_overlay_version += 1
+            self.audio_overlay_rendered_version = self.audio_overlay_version
+        self._create_audio_overlay_window()
+        self.audio_overlay_start_button.configure(state=tk.DISABLED)
+        self.audio_overlay_stop_button.configure(state=tk.NORMAL)
+        self.audio_overlay_status_var.set(f"运行中 · {self.audio_overlay_frame_rate:g} FPS")
+
+        stop_event = threading.Event()
+        self.audio_overlay_stop_event = stop_event
+        self.audio_overlay_thread = threading.Thread(
+            target=self.run_audio_overlay,
+            args=(source_id, stop_event),
+            daemon=True,
+        )
+        self.audio_overlay_thread.start()
+        self.audio_overlay_refresh_job = self.root.after(10, self.update_audio_overlay)
+        self.log_message(f"音频可视化独立窗口已启动: {source_id}")
+        self.status_var.set("音频可视化独立窗口运行中")
+
+    def run_audio_overlay(self, source_id, stop_event):
+        """Render and PNG-encode overlay frames away from Tk's UI thread."""
+        next_frame_at = time.monotonic()
+        try:
+            while not stop_event.is_set():
+                frame = streamer.get_audio_overlay_frame(source_id)
+                if frame is None:
+                    raise RuntimeError("音频可视化源没有返回透明画面")
+                size = self.audio_overlay_size
+                if frame.shape[0] != size or frame.shape[1] != size:
+                    interpolation = cv2.INTER_AREA if size < frame.shape[0] else cv2.INTER_LINEAR
+                    frame = cv2.resize(frame, (size, size), interpolation=interpolation)
+                # Resizing BGRA introduces partially transparent edge pixels.
+                # Tk pre-blends those against black on Windows, so restore the
+                # binary mask before handing the PNG to PhotoImage.
+                if frame.ndim == 3 and frame.shape[2] == 4:
+                    visible = frame[:, :, 3] >= 128
+                    frame[:, :, 3] = np.where(visible, 255, 0).astype(np.uint8)
+                    frame[~visible, :3] = 0
+                ok, encoded = cv2.imencode('.png', frame)
+                if not ok:
+                    raise RuntimeError("无法编码透明窗口画面")
+                image_data = base64.b64encode(encoded.tobytes()).decode('ascii')
+                with self.audio_overlay_lock:
+                    self.audio_overlay_png = image_data
+                    self.audio_overlay_version += 1
+
+                interval = 1.0 / max(self.audio_overlay_frame_rate, MIN_SOURCE_FRAME_RATE)
+                next_frame_at = max(next_frame_at + interval, time.monotonic())
+                stop_event.wait(max(0.0, next_frame_at - time.monotonic()))
+        except Exception as e:
+            if not stop_event.is_set():
+                self.audio_overlay_error = str(e)
+                self.ui_action_queue.put(self.handle_audio_overlay_failure)
+
+    def update_audio_overlay(self):
+        try:
+            if not self.audio_overlay_running or self.audio_overlay_window is None:
+                return
+            with self.audio_overlay_lock:
+                version = self.audio_overlay_version
+                image_data = self.audio_overlay_png
+            if image_data is not None and version != self.audio_overlay_rendered_version:
+                self.audio_overlay_image = tk.PhotoImage(data=image_data, format='png')
+                self.audio_overlay_label.configure(image=self.audio_overlay_image)
+                self.audio_overlay_rendered_version = version
+        except (RuntimeError, tk.TclError):
+            return
+        except Exception as e:
+            self.log_message(f"刷新音频透明窗口失败: {str(e)}")
+        finally:
+            if self.audio_overlay_running:
+                try:
+                    self.audio_overlay_refresh_job = self.root.after(10, self.update_audio_overlay)
+                except tk.TclError:
+                    self.audio_overlay_refresh_job = None
+
+    def begin_audio_overlay_drag(self, event):
+        window = self.audio_overlay_window
+        if window is not None:
+            self.audio_overlay_drag_origin = (
+                event.x_root,
+                event.y_root,
+                window.winfo_x(),
+                window.winfo_y(),
+            )
+
+    def drag_audio_overlay(self, event):
+        if self.audio_overlay_window is None or self.audio_overlay_drag_origin is None:
+            return
+        start_x, start_y, window_x, window_y = self.audio_overlay_drag_origin
+        x = window_x + event.x_root - start_x
+        y = window_y + event.y_root - start_y
+        self.audio_overlay_window.geometry(f"+{x}+{y}")
+
+    def resize_audio_overlay(self, event):
+        window = self.audio_overlay_window
+        if window is None:
+            return
+        delta = 40 if event.delta > 0 else -40
+        self.audio_overlay_size = max(160, min(1200, self.audio_overlay_size + delta))
+        window.geometry(
+            f"{self.audio_overlay_size}x{self.audio_overlay_size}+"
+            f"{window.winfo_x()}+{window.winfo_y()}"
+        )
+
+    def stop_audio_overlay(self):
+        was_running = self.audio_overlay_running
+        self.audio_overlay_running = False
+        if self.audio_overlay_stop_event is not None:
+            self.audio_overlay_stop_event.set()
+        if self.audio_overlay_refresh_job is not None:
+            try:
+                self.root.after_cancel(self.audio_overlay_refresh_job)
+            except tk.TclError:
+                pass
+            self.audio_overlay_refresh_job = None
+        if self.audio_overlay_window is not None:
+            try:
+                self.audio_overlay_window.destroy()
+            except tk.TclError:
+                pass
+        self.audio_overlay_window = None
+        self.audio_overlay_label = None
+        self.audio_overlay_image = None
+        self.audio_overlay_source_id = None
+        self.audio_overlay_start_button.configure(state=tk.NORMAL)
+        self.audio_overlay_stop_button.configure(state=tk.DISABLED)
+        self.audio_overlay_status_var.set("独立窗口未运行")
+        if was_running:
+            self.log_message("音频可视化独立窗口已关闭")
+            self.status_var.set("音频可视化独立窗口已关闭")
+
+    def handle_audio_overlay_failure(self):
+        error = self.audio_overlay_error or "未知错误"
+        self.stop_audio_overlay()
+        self.log_message(f"音频可视化独立窗口错误: {error}")
+        self.status_var.set("音频可视化独立窗口出错")
+
     def refresh_audio_controls(self):
         """从当前音频源读取效果目录、参数元数据和运行时值。"""
         source_id = self.get_selected_source_id()
@@ -1411,6 +1703,9 @@ class YAMLConfigEditor:
             info = streamer.get_source_info(source_id)
             config = info.get('config', {})
             audio_ui = info.get('audio_ui', {})
+            frame_rate = float(info.get('fps', self.audio_overlay_frame_rate))
+            self.audio_overlay_frame_rate = frame_rate
+            self.audio_overlay_fps_var.set(f"{frame_rate:g}")
             self.updating_audio_controls = True
             self.audio_effect_catalog = list(audio_ui.get('effects', []))
             self.audio_effect_meta = {item['id']: item for item in self.audio_effect_catalog}
@@ -2435,6 +2730,10 @@ class YAMLConfigEditor:
 
     def on_closing(self):
         """窗口关闭时的处理"""
+        if self.audio_overlay_running or self.audio_overlay_window is not None:
+            self.stop_audio_overlay()
+        if self.audio_overlay_thread and self.audio_overlay_thread.is_alive():
+            self.audio_overlay_thread.join(timeout=2)
         if self.log_flush_job is not None:
             try:
                 self.root.after_cancel(self.log_flush_job)

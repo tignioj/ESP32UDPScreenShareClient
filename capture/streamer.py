@@ -121,6 +121,10 @@ class Streamer:
         """获取图像源最近缓存的预览画面。"""
         return self.source_manager.get_source_preview(source_id)
 
+    def get_audio_overlay_frame(self, source_id: str) -> Optional[np.ndarray]:
+        """Return one transparent audio-visualization frame."""
+        return self.source_manager.capture_overlay_frame(source_id)
+
     def set_source_config(self, config: Dict[str, Any], source_id: str = None) -> bool:
         """设置图像源配置"""
         return self.source_manager.set_source_config(config, source_id)

@@ -153,6 +153,15 @@ class SourceManager:
 
             return source.capture()
 
+    def capture_overlay_frame(self, source_id: str) -> Optional[np.ndarray]:
+        """Capture a transparent frame from an audio visualization source."""
+        with self._source_lock:
+            source = self.get_source(source_id)
+            overlay_capture = getattr(source, 'capture_overlay', None) if source else None
+            if overlay_capture is None:
+                return None
+            return overlay_capture()
+
     def get_source_info(self, source_id: str = None) -> Dict[str, Any]:
         """在线程安全的前提下读取图像源配置。"""
         with self._source_lock:

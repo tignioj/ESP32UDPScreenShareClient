@@ -80,6 +80,11 @@ class AudioVisualizationSource(ImageSourceInterface):
         with self._config_lock:
             return self.visualizer.get_frame() if self.visualizer is not None else None
 
+    def capture_overlay(self) -> Optional[np.ndarray]:
+        """Render the effects without their opaque scene background."""
+        with self._config_lock:
+            return self.visualizer.get_overlay_frame() if self.visualizer is not None else None
+
     def get_info(self) -> Dict[str, Any]:
         with self._config_lock:
             config = self.visualizer.get_config() if self.visualizer is not None else {}

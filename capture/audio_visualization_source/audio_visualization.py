@@ -256,7 +256,8 @@ class AudioVisualizer:
                 },
             }
 
-    def get_frame(self) -> np.ndarray:
+    def _render_effects(self, canvas: np.ndarray) -> np.ndarray:
+        """Render one animation step onto the supplied BGR canvas."""
         now = time.monotonic()
         dt = min(0.1, max(0.001, now - self._last_frame_time))
         self._last_frame_time = now
@@ -274,10 +275,35 @@ class AudioVisualizer:
             self._beat *= 0.88
             enabled_effects = [effect for effect in self.effects.values() if effect.enabled]
 
-        canvas = self._background.copy()
         for effect in enabled_effects:
             effect.draw(canvas, frame, dt)
         return canvas
+
+    def get_frame(self) -> np.ndarray:
+        return self._render_effects(self._background.copy())
+
+    def get_overlay_frame(self) -> np.ndarray:
+        """Return a BGRA frame with a truly transparent unused background.
+
+        Effects are first composited over black.  Their intensity becomes the
+        provisional alpha channel and the colour is un-premultiplied.  Tk on
+        Windows pre-composites partially transparent PhotoImage pixels against
+        the widget background, which otherwise leaves a large black haze in a
+        transparent-colour window.  A binary alpha mask avoids that artefact.
+        """
+        canvas = self._render_effects(
+            np.zeros((self.height, self.width, 3), dtype=np.uint8)
+        )
+        intensity = np.max(canvas, axis=2).astype(np.float32)
+        provisional_alpha = np.clip(intensity * 3.0, 0.0, 255.0)
+        visible = provisional_alpha >= 64.0
+
+        colour = canvas.astype(np.float32)
+        colour[visible] *= (255.0 / provisional_alpha[visible, None])
+        colour[~visible] = 0.0
+        colour = np.clip(colour, 0.0, 255.0).astype(np.uint8)
+        alpha = np.where(visible, 255, 0).astype(np.uint8)
+        return np.dstack((colour, alpha))
 
     def release(self) -> None:
         stream = self.stream

@@ -35,6 +35,19 @@ class AudioVisualizationTests(unittest.TestCase):
             self.assertEqual((240, 240, 3), frame.shape, effect_id)
             self.assertEqual(np.uint8, frame.dtype, effect_id)
 
+    def test_overlay_frame_has_transparent_background_and_visible_effects(self):
+        for effect in self.visualizer.effects.values():
+            effect.enabled = False
+        self.visualizer.effects["waveform"].enabled = True
+
+        frame = self.visualizer.get_overlay_frame()
+
+        self.assertEqual((240, 240, 4), frame.shape)
+        self.assertEqual(np.uint8, frame.dtype)
+        self.assertGreater(np.count_nonzero(frame[:, :, 3]), 0)
+        self.assertGreater(np.count_nonzero(frame[:, :, 3] == 0), 0)
+        self.assertEqual({0, 255}, set(np.unique(frame[:, :, 3])))
+
     def test_effect_parameters_are_namespaced(self):
         original_waveform = dict(self.visualizer.effects["waveform"].values)
         self.visualizer.configure({
